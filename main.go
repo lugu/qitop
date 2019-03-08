@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/lugu/qiloop/bus"
 	"github.com/lugu/qiloop/bus/client/object"
@@ -20,7 +21,12 @@ type collector struct {
 }
 
 func NewCollector(services map[string]object.ObjectProxy) *collector {
-	actions := make(map[string]string)
+
+	c := &collector{
+		services: services,
+		counter:  make(map[string]uint32),
+		actions:  make(map[string]string),
+	}
 
 	for servicename, obj := range services {
 		meta, err := obj.MetaObject(obj.ObjectID())
@@ -30,15 +36,12 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 		for id, method := range meta.Methods {
 			actionID := fmt.Sprintf("%s.%d", servicename, id)
 			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
-			actions[actionID] = actionName
+			c.actions[actionID] = actionName
+			c.counter[actionName] = 0
 		}
 	}
 
-	return &collector{
-		services: services,
-		counter:  make(map[string]uint32),
-		actions:  actions,
-	}
+	return c
 }
 
 func getObject(sess bus.Session, info services.ServiceInfo) object.ObjectProxy {
@@ -52,7 +55,8 @@ func getObject(sess bus.Session, info services.ServiceInfo) object.ObjectProxy {
 func (c *collector) updateStat(name string, statistics map[uint32]object.MethodStatistics) error {
 	for action, stat := range statistics {
 		entry := fmt.Sprintf("%s.%d", name, action)
-		c.counter[entry] += stat.Count
+		action := c.actions[entry]
+		c.counter[action] += stat.Count
 	}
 	return nil
 }
@@ -77,7 +81,7 @@ func (c *collector) print() {
 	}
 	sort.Sort(counter)
 	for _, entry := range counter {
-		fmt.Printf("%s: %d\n", c.actions[entry.action], entry.count)
+		fmt.Printf("%s: %d\n", entry.action, entry.count)
 	}
 }
 
@@ -118,7 +122,9 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 }
 
 func main() {
-	sess, err := session.NewSession("tcp://localhost:9559")
+	var serverURL = flag.String("qi-url", "tcp://127.0.0.1:9559", "server URL")
+	flag.Parse()
+	sess, err := session.NewSession(*serverURL)
 	if err != nil {
 		panic(err)
 	}
