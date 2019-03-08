@@ -23,6 +23,13 @@ type collector struct {
 	uiListMutex sync.Mutex
 }
 
+func ignoreAction(id uint32) bool {
+	if id < 0x50 || id > 0x53 {
+		return false
+	}
+	return true
+}
+
 func NewCollector(services map[string]object.ObjectProxy) *collector {
 
 	// enable stats
@@ -50,6 +57,9 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 			panic(err)
 		}
 		for id, method := range meta.Methods {
+			if ignoreAction(id) {
+				continue
+			}
 			actionID := fmt.Sprintf("%s.%d", servicename, id)
 			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
 			c.actions[actionID] = actionName
@@ -71,9 +81,12 @@ func getObject(sess bus.Session, info services.ServiceInfo) object.ObjectProxy {
 
 func (c *collector) updateStat(name string, statistics map[uint32]object.MethodStatistics) error {
 	for action, stat := range statistics {
+		if ignoreAction(action) {
+			continue
+		}
 		entry := fmt.Sprintf("%s.%d", name, action)
 		action := c.actions[entry]
-		c.counter[action] += stat.Count
+		c.counter[action] = stat.Count
 	}
 	return nil
 }
@@ -98,8 +111,8 @@ func (c *collector) print() {
 	}
 	sort.Sort(counter)
 	/* FIXME
-	for _, entry := range counter {
-		fmt.Printf("%s: %d\n", entry.action, entry.count)
+	for i, entry := range counter {
+		fmt.Printf("(%04d) %s: %d\n", len(counter)-i, entry.action, entry.count)
 	}
 	*/
 }
@@ -128,6 +141,10 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 	}
 	defer ui.Close()
 
+	grid := ui.NewGrid()
+	termWidth, termHeight := ui.TerminalDimensions()
+	grid.SetRect(0, 0, termWidth, termHeight)
+
 	c := NewCollector(services)
 	defer func() {
 		for _, obj := range c.services {
@@ -136,7 +153,9 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 		log.Printf("Terminated.")
 	}()
 
-	ui.Render(c.uiList)
+	grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, c.uiList)))
+
+	ui.Render(grid)
 	uiEvents := ui.PollEvents()
 
 	errors := make(chan error)
@@ -172,7 +191,7 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 		case _ = <-ticker:
 			go c.update(errors)
 		}
-		ui.Render(c.uiList)
+		ui.Render(grid)
 	}
 }
 
