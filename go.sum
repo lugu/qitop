@@ -1,3 +1,5 @@
+github.com/bcicen/termui v0.0.0-20180326052246-4eb80249d3f5 h1:2pI3ZsoefWIi++8EqmANoC7Px/v2lRwnleVUcCuFgLg=
+github.com/bcicen/termui v0.0.0-20180326052246-4eb80249d3f5/go.mod h1:yIA9ITWZD1p4/DvCQ44xvhyVb9XEUlVnY1rzGSHwbiM=
 github.com/cjbassi/drawille-go v0.0.0-20190126131713-27dc511fe6fd h1:XtfPmj9tQRilnrEmI1HjQhxXWRhEM+m8CACtaMJE/kM=
 github.com/cjbassi/drawille-go v0.0.0-20190126131713-27dc511fe6fd/go.mod h1:vjcQJUZJYD3MeVGhtZXSMnCHfUNZxsyYzJt90eCYxK4=
 github.com/dave/jennifer v1.3.0 h1:p3tl41zjjCZTNBytMwrUuiAnherNUZktlhPTKoF/sEk=

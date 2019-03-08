@@ -3,30 +3,46 @@ package main
 import (
 	"flag"
 	"fmt"
+	ui "github.com/gizak/termui/v3"
+	"github.com/gizak/termui/v3/widgets"
 	"github.com/lugu/qiloop/bus"
 	"github.com/lugu/qiloop/bus/client/object"
 	"github.com/lugu/qiloop/bus/client/services"
 	"github.com/lugu/qiloop/bus/session"
 	"log"
-	"os"
-	"os/signal"
 	"sort"
+	"sync"
 	"time"
 )
 
 type collector struct {
-	services map[string]object.ObjectProxy
-	counter  map[string]uint32
-	actions  map[string]string
+	services    map[string]object.ObjectProxy
+	counter     map[string]uint32
+	actions     map[string]string
+	uiList      *widgets.List
+	uiListMutex sync.Mutex
 }
 
 func NewCollector(services map[string]object.ObjectProxy) *collector {
+
+	// enable stats
+	for _, obj := range services {
+		obj.EnableStats(true)
+
+	}
 
 	c := &collector{
 		services: services,
 		counter:  make(map[string]uint32),
 		actions:  make(map[string]string),
+		uiList:   widgets.NewList(),
 	}
+
+	c.uiList.Title = "Methods"
+	c.uiList.TextStyle = ui.NewStyle(ui.ColorYellow)
+	c.uiList.WrapText = false
+	c.uiList.SetRect(0, 0, 25, 8)
+	c.uiList.Rows = make([]string, 0)
 
 	for servicename, obj := range services {
 		meta, err := obj.MetaObject(obj.ObjectID())
@@ -38,9 +54,10 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
 			c.actions[actionID] = actionName
 			c.counter[actionName] = 0
+			toPrint := fmt.Sprintf("%s: %d", actionName, 0)
+			c.uiList.Rows = append(c.uiList.Rows, toPrint)
 		}
 	}
-
 	return c
 }
 
@@ -80,50 +97,89 @@ func (c *collector) print() {
 		})
 	}
 	sort.Sort(counter)
+	/* FIXME
 	for _, entry := range counter {
 		fmt.Printf("%s: %d\n", entry.action, entry.count)
 	}
+	*/
 }
 
-func (c *collector) update() error {
+func (c *collector) update(errors chan error) {
 	for name, obj := range c.services {
 		stats, err := obj.Stats()
 		if err != nil {
-			return err
+			errors <- err
+			return
 		}
 		if err := c.updateStat(name, stats); err != nil {
-			return err
+			errors <- err
+			return
 		}
 
 	}
-	return nil
+	c.print()
 }
 
 func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
+	if err := ui.Init(); err != nil {
+		log.Print(err)
+		return
+	}
+	defer ui.Close()
+
+	c := NewCollector(services)
+	defer func() {
+		for _, obj := range c.services {
+			obj.EnableStats(false)
+		}
+		log.Printf("Terminated.")
+	}()
+
+	ui.Render(c.uiList)
+	uiEvents := ui.PollEvents()
+
+	errors := make(chan error)
+
 	ticker := time.Tick(1000 * time.Millisecond)
 
-	collector := NewCollector(services)
 	for {
 		select {
-		case s := <-c:
-			log.Printf("Got signal: %v", s)
+		case err := <-errors:
+			log.Printf("Error: %s", err)
 			return
-		case _ = <-ticker:
-
-			if err := collector.update(); err != nil {
-				log.Printf("Error: %v", err)
+		case e := <-uiEvents:
+			switch e.ID {
+			case "q", "<C-c>":
+				return
+			case "j", "<Down>":
+				c.uiList.ScrollDown()
+			case "k", "<Up>":
+				c.uiList.ScrollUp()
+			case "<C-d>":
+				c.uiList.ScrollHalfPageDown()
+			case "<C-u>":
+				c.uiList.ScrollHalfPageUp()
+			case "<C-f>":
+				c.uiList.ScrollPageDown()
+			case "<C-b>":
+				c.uiList.ScrollPageUp()
+			case "<Home>":
+				c.uiList.ScrollTop()
+			case "G", "<End>":
+				c.uiList.ScrollBottom()
 			}
-			collector.print()
+		case _ = <-ticker:
+			go c.update(errors)
 		}
+		ui.Render(c.uiList)
 	}
 }
 
 func main() {
 	var serverURL = flag.String("qi-url", "tcp://127.0.0.1:9559", "server URL")
 	flag.Parse()
+
 	sess, err := session.NewSession(*serverURL)
 	if err != nil {
 		panic(err)
@@ -147,19 +203,6 @@ func main() {
 		services[info.Name] = getObject(sess, info)
 	}
 
-	// enable stats
-	for _, obj := range services {
-		obj.EnableStats(true)
-
-	}
-
 	// print stats
 	loop(sess, services)
-
-	// stop stats
-	for _, obj := range services {
-		obj.EnableStats(false)
-
-	}
-	log.Printf("Terminated.")
 }
