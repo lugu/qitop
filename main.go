@@ -16,12 +16,28 @@ import (
 type collector struct {
 	services map[string]object.ObjectProxy
 	counter  map[string]uint32
+	actions  map[string]string
 }
 
 func NewCollector(services map[string]object.ObjectProxy) *collector {
+	actions := make(map[string]string)
+
+	for servicename, obj := range services {
+		meta, err := obj.MetaObject(obj.ObjectID())
+		if err != nil {
+			panic(err)
+		}
+		for id, method := range meta.Methods {
+			actionID := fmt.Sprintf("%s.%d", servicename, id)
+			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
+			actions[actionID] = actionName
+		}
+	}
+
 	return &collector{
 		services: services,
 		counter:  make(map[string]uint32),
+		actions:  actions,
 	}
 }
 
@@ -61,7 +77,7 @@ func (c *collector) print() {
 	}
 	sort.Sort(counter)
 	for _, entry := range counter {
-		fmt.Printf("%s: %d\n", entry.action, entry.count)
+		fmt.Printf("%s: %d\n", c.actions[entry.action], entry.count)
 	}
 }
 
