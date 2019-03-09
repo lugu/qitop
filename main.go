@@ -11,16 +11,13 @@ import (
 	"github.com/lugu/qiloop/bus/session"
 	"log"
 	"sort"
-	"sync"
 	"time"
 )
 
 type collector struct {
-	services    map[string]object.ObjectProxy
-	counter     map[string]uint32
-	actions     map[string]string
-	uiList      *widgets.List
-	uiListMutex sync.Mutex
+	services map[string]object.ObjectProxy
+	counter  map[string]uint32
+	actions  map[string]string
 }
 
 func ignoreAction(id uint32) bool {
@@ -42,14 +39,7 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 		services: services,
 		counter:  make(map[string]uint32),
 		actions:  make(map[string]string),
-		uiList:   widgets.NewList(),
 	}
-
-	c.uiList.Title = "Methods"
-	c.uiList.TextStyle = ui.NewStyle(ui.ColorYellow)
-	c.uiList.WrapText = false
-	c.uiList.SetRect(0, 0, 25, 8)
-	c.uiList.Rows = make([]string, 0)
 
 	for servicename, obj := range services {
 		meta, err := obj.MetaObject(obj.ObjectID())
@@ -64,8 +54,6 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
 			c.actions[actionID] = actionName
 			c.counter[actionName] = 0
-			toPrint := fmt.Sprintf("%s: %d", actionName, 0)
-			c.uiList.Rows = append(c.uiList.Rows, toPrint)
 		}
 	}
 	return c
@@ -99,38 +87,55 @@ type gallery []entry
 
 func (e gallery) Len() int           { return len(e) }
 func (e gallery) Swap(i, j int)      { e[i], e[j] = e[j], e[i] }
-func (e gallery) Less(i, j int) bool { return e[i].count < e[j].count }
+func (e gallery) Less(i, j int) bool { return e[i].count > e[j].count }
 
-func (c *collector) print() {
-	var counter gallery = make([]entry, 0)
+func (c *collector) top() []string {
+	counter := make([]entry, 0)
 	for action, count := range c.counter {
 		counter = append(counter, entry{
 			action: action,
 			count:  count,
 		})
 	}
-	sort.Sort(counter)
-	/* FIXME
+	sort.Sort(gallery(counter))
+	lines := make([]string, len(c.counter))
 	for i, entry := range counter {
-		fmt.Printf("(%04d) %s: %d\n", len(counter)-i, entry.action, entry.count)
+		lines[i] = fmt.Sprintf("[%04d] %s: %d", i+1,
+			entry.action, entry.count)
 	}
-	*/
+	return lines
 }
 
-func (c *collector) update(errors chan error) {
+func (c *collector) updateStream() chan []string {
+	out := make(chan []string)
+
+	go func() {
+		ticker := time.Tick(1000 * time.Millisecond)
+		for {
+			<-ticker
+			list, err := c.update()
+			if err != nil {
+				fmt.Print(err)
+				close(out)
+			}
+			out <- list
+		}
+	}()
+	return out
+}
+
+func (c *collector) update() ([]string, error) {
 	for name, obj := range c.services {
 		stats, err := obj.Stats()
 		if err != nil {
-			errors <- err
-			return
+			return nil, err
 		}
 		if err := c.updateStat(name, stats); err != nil {
-			errors <- err
-			return
+			return nil, err
 		}
 
 	}
-	c.print()
+	return c.top(), nil
 }
 
 func loop(sess bus.Session, services map[string]object.ObjectProxy) {
@@ -153,43 +158,56 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 		log.Printf("Terminated.")
 	}()
 
-	grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, c.uiList)))
+	list := widgets.NewList()
+	list.Title = "Most used methods"
+	list.TextStyle = ui.NewStyle(ui.ColorYellow)
+	list.WrapText = false
+	list.SetRect(0, 0, 25, 8)
+	list.Rows = c.top()
 
+	grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
 	ui.Render(grid)
+
 	uiEvents := ui.PollEvents()
-
-	errors := make(chan error)
-
-	ticker := time.Tick(1000 * time.Millisecond)
+	updates := c.updateStream()
 
 	for {
 		select {
-		case err := <-errors:
-			log.Printf("Error: %s", err)
-			return
+		case lines, ok := <-updates:
+			if !ok {
+				log.Printf("Remote error")
+				return
+			}
+			// for _, line := range lines {
+			// 	fmt.Printf("%s\n", line)
+			// }
+			list.Rows = lines
+			grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
 		case e := <-uiEvents:
 			switch e.ID {
 			case "q", "<C-c>":
 				return
 			case "j", "<Down>":
-				c.uiList.ScrollDown()
+				list.ScrollDown()
 			case "k", "<Up>":
-				c.uiList.ScrollUp()
+				list.ScrollUp()
 			case "<C-d>":
-				c.uiList.ScrollHalfPageDown()
+				list.ScrollHalfPageDown()
 			case "<C-u>":
-				c.uiList.ScrollHalfPageUp()
+				list.ScrollHalfPageUp()
 			case "<C-f>":
-				c.uiList.ScrollPageDown()
+				list.ScrollPageDown()
 			case "<C-b>":
-				c.uiList.ScrollPageUp()
+				list.ScrollPageUp()
 			case "<Home>":
-				c.uiList.ScrollTop()
+				list.ScrollTop()
 			case "G", "<End>":
-				c.uiList.ScrollBottom()
+				list.ScrollBottom()
+			case "<Resize>":
+				payload := e.Payload.(ui.Resize)
+				grid.SetRect(0, 0, payload.Width, payload.Height)
+				ui.Clear()
 			}
-		case _ = <-ticker:
-			go c.update(errors)
 		}
 		ui.Render(grid)
 	}
