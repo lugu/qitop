@@ -16,7 +16,7 @@ import (
 
 type collector struct {
 	services map[string]object.ObjectProxy
-	counter  map[string]uint32
+	counter  map[string]object.MethodStatistics
 	actions  map[string]string
 }
 
@@ -37,7 +37,7 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 
 	c := &collector{
 		services: services,
-		counter:  make(map[string]uint32),
+		counter:  make(map[string]object.MethodStatistics),
 		actions:  make(map[string]string),
 	}
 
@@ -53,7 +53,7 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 			actionID := fmt.Sprintf("%s.%d", servicename, id)
 			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
 			c.actions[actionID] = actionName
-			c.counter[actionName] = 0
+			c.counter[actionName] = object.MethodStatistics{}
 		}
 	}
 	return c
@@ -74,20 +74,26 @@ func (c *collector) updateStat(name string, statistics map[uint32]object.MethodS
 		}
 		entry := fmt.Sprintf("%s.%d", name, action)
 		action := c.actions[entry]
-		c.counter[action] = stat.Count
+		c.counter[action] = stat
 	}
 	return nil
 }
 
 type entry struct {
-	count  uint32
+	count  object.MethodStatistics
 	action string
 }
 type gallery []entry
 
-func (e gallery) Len() int           { return len(e) }
-func (e gallery) Swap(i, j int)      { e[i], e[j] = e[j], e[i] }
-func (e gallery) Less(i, j int) bool { return e[i].count > e[j].count }
+func (e gallery) Len() int      { return len(e) }
+func (e gallery) Swap(i, j int) { e[i], e[j] = e[j], e[i] }
+func (e gallery) Less(i, j int) bool {
+	if e[i].count.Count == e[j].count.Count {
+		return e[i].count.Wall.CumulatedValue >
+			e[j].count.Wall.CumulatedValue
+	}
+	return e[i].count.Count > e[j].count.Count
+}
 
 func (c *collector) top() []string {
 	counter := make([]entry, 0)
@@ -101,7 +107,7 @@ func (c *collector) top() []string {
 	lines := make([]string, len(c.counter))
 	for i, entry := range counter {
 		lines[i] = fmt.Sprintf("[%04d] %s: %d", i+1,
-			entry.action, entry.count)
+			entry.action, entry.count.Count)
 	}
 	return lines
 }
