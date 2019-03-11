@@ -10,6 +10,8 @@ import (
 	"github.com/lugu/qiloop/bus/client/services"
 	"github.com/lugu/qiloop/bus/session"
 	"log"
+	"os"
+	"os/signal"
 	"sort"
 	"time"
 )
@@ -38,7 +40,7 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 	for servicename, obj := range services {
 		meta, err := obj.MetaObject(obj.ObjectID())
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 		for id, method := range meta.Methods {
 			if ignoreAction(id) {
@@ -138,7 +140,31 @@ func (c *collector) update() ([]string, error) {
 	return c.top(), nil
 }
 
-func loop(sess bus.Session, services map[string]object.ObjectProxy) {
+func loopBatch(sess bus.Session, services map[string]object.ObjectProxy) {
+	c := NewCollector(services)
+	updates := c.updateStream()
+
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+
+	for {
+		select {
+		case s := <-interrupt:
+			log.Printf("%v: quitting.", s)
+			return
+		case lines, ok := <-updates:
+			if !ok {
+				log.Printf("Remote error")
+				return
+			}
+			for _, line := range lines {
+				fmt.Printf("%s\n", line)
+			}
+		}
+	}
+}
+
+func loopTermUI(sess bus.Session, services map[string]object.ObjectProxy) {
 
 	if err := ui.Init(); err != nil {
 		log.Print(err)
@@ -172,9 +198,6 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 				log.Printf("Remote error")
 				return
 			}
-			// for _, line := range lines {
-			// 	fmt.Printf("%s\n", line)
-			// }
 			list.Rows = lines
 			grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
 		case e := <-uiEvents:
@@ -209,6 +232,7 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 
 func main() {
 	var serverURL = flag.String("qi-url", "tcp://127.0.0.1:9559", "server URL")
+	var bactchMode = flag.Bool("b", false, "batch mode (default disable)")
 	flag.Parse()
 
 	sess, err := session.NewSession(*serverURL)
@@ -247,5 +271,9 @@ func main() {
 	}()
 
 	// print stats
-	loop(sess, services)
+	if *bactchMode {
+		loopBatch(sess, services)
+	} else {
+		loopTermUI(sess, services)
+	}
 }
