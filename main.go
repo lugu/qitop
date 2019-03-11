@@ -29,12 +29,6 @@ func ignoreAction(id uint32) bool {
 
 func NewCollector(services map[string]object.ObjectProxy) *collector {
 
-	// enable stats
-	for _, obj := range services {
-		obj.EnableStats(true)
-
-	}
-
 	c := &collector{
 		services: services,
 		counter:  make(map[string]object.MethodStatistics),
@@ -157,12 +151,6 @@ func loop(sess bus.Session, services map[string]object.ObjectProxy) {
 	grid.SetRect(0, 0, termWidth, termHeight)
 
 	c := NewCollector(services)
-	defer func() {
-		for _, obj := range c.services {
-			obj.EnableStats(false)
-		}
-		log.Printf("Terminated.")
-	}()
 
 	list := widgets.NewList()
 	list.Title = "Most used methods"
@@ -225,19 +213,19 @@ func main() {
 
 	sess, err := session.NewSession(*serverURL)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	proxies := services.Services(sess)
 
 	directory, err := proxies.ServiceDirectory()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	serviceList, err := directory.Services()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	services := make(map[string]object.ObjectProxy)
@@ -245,6 +233,18 @@ func main() {
 	for _, info := range serviceList {
 		services[info.Name] = getObject(sess, info)
 	}
+
+	// enable stats
+	for _, obj := range services {
+		obj.EnableStats(true)
+		obj.ClearStats()
+
+	}
+	defer func() {
+		for _, obj := range services {
+			obj.EnableStats(false)
+		}
+	}()
 
 	// print stats
 	loop(sess, services)
