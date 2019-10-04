@@ -3,22 +3,22 @@ package main
 import (
 	"flag"
 	"fmt"
-	ui "github.com/gizak/termui/v3"
-	"github.com/gizak/termui/v3/widgets"
-	"github.com/lugu/qiloop/bus"
-	"github.com/lugu/qiloop/bus/client/object"
-	"github.com/lugu/qiloop/bus/client/services"
-	"github.com/lugu/qiloop/bus/session"
 	"log"
 	"os"
 	"os/signal"
 	"sort"
 	"time"
+
+	ui "github.com/gizak/termui/v3"
+	"github.com/gizak/termui/v3/widgets"
+	"github.com/lugu/qiloop/app"
+	"github.com/lugu/qiloop/bus"
+	"github.com/lugu/qiloop/bus/services"
 )
 
 type collector struct {
-	services map[string]object.ObjectProxy
-	counter  map[string]object.MethodStatistics
+	services map[string]bus.ObjectProxy
+	counter  map[string]bus.MethodStatistics
 	actions  map[string]string
 }
 
@@ -29,11 +29,11 @@ func ignoreAction(id uint32) bool {
 	return true
 }
 
-func NewCollector(services map[string]object.ObjectProxy) *collector {
+func NewCollector(services map[string]bus.ObjectProxy) *collector {
 
 	c := &collector{
 		services: services,
-		counter:  make(map[string]object.MethodStatistics),
+		counter:  make(map[string]bus.MethodStatistics),
 		actions:  make(map[string]string),
 	}
 
@@ -49,21 +49,21 @@ func NewCollector(services map[string]object.ObjectProxy) *collector {
 			actionID := fmt.Sprintf("%s.%d", servicename, id)
 			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
 			c.actions[actionID] = actionName
-			c.counter[actionName] = object.MethodStatistics{}
+			c.counter[actionName] = bus.MethodStatistics{}
 		}
 	}
 	return c
 }
 
-func getObject(sess bus.Session, info services.ServiceInfo) object.ObjectProxy {
+func getObject(sess bus.Session, info services.ServiceInfo) bus.ObjectProxy {
 	proxy, err := sess.Proxy(info.Name, 1)
 	if err != nil {
 		log.Fatalf("failed to connect service (%s): %s", info.Name, err)
 	}
-	return object.MakeObject(proxy)
+	return bus.MakeObject(proxy)
 }
 
-func (c *collector) updateStat(name string, statistics map[uint32]object.MethodStatistics) error {
+func (c *collector) updateStat(name string, statistics map[uint32]bus.MethodStatistics) error {
 	for action, stat := range statistics {
 		if ignoreAction(action) {
 			continue
@@ -76,7 +76,7 @@ func (c *collector) updateStat(name string, statistics map[uint32]object.MethodS
 }
 
 type entry struct {
-	count  object.MethodStatistics
+	count  bus.MethodStatistics
 	action string
 }
 type gallery []entry
@@ -140,7 +140,7 @@ func (c *collector) update() ([]string, error) {
 	return c.top(), nil
 }
 
-func loopBatch(sess bus.Session, services map[string]object.ObjectProxy) {
+func loopBatch(sess bus.Session, services map[string]bus.ObjectProxy) {
 	c := NewCollector(services)
 	updates := c.updateStream()
 
@@ -164,7 +164,7 @@ func loopBatch(sess bus.Session, services map[string]object.ObjectProxy) {
 	}
 }
 
-func loopTermUI(sess bus.Session, services map[string]object.ObjectProxy) {
+func loopTermUI(sess bus.Session, services map[string]bus.ObjectProxy) {
 
 	if err := ui.Init(); err != nil {
 		log.Print(err)
@@ -231,11 +231,10 @@ func loopTermUI(sess bus.Session, services map[string]object.ObjectProxy) {
 }
 
 func main() {
-	var serverURL = flag.String("qi-url", "tcp://127.0.0.1:9559", "server URL")
 	var bactchMode = flag.Bool("b", false, "batch mode (default disable)")
 	flag.Parse()
 
-	sess, err := session.NewSession(*serverURL)
+	sess, err := app.SessionFromFlag()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -252,7 +251,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	services := make(map[string]object.ObjectProxy)
+	services := make(map[string]bus.ObjectProxy)
 
 	for _, info := range serviceList {
 		services[info.Name] = getObject(sess, info)
