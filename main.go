@@ -94,13 +94,16 @@ func (e gallery) Less(i, j int) bool {
 func (c *collector) top() []string {
 	counter := make([]entry, 0)
 	for action, count := range c.counter {
+		if count.Count == 0 {
+			continue
+		}
 		counter = append(counter, entry{
 			action: action,
 			count:  count,
 		})
 	}
 	sort.Sort(gallery(counter))
-	lines := make([]string, len(c.counter))
+	lines := make([]string, len(counter))
 	for i, entry := range counter {
 		lines[i] = fmt.Sprintf("[%04d] %s: %d", i+1,
 			entry.action, entry.count.Count)
