@@ -91,7 +91,7 @@ func (e gallery) Less(i, j int) bool {
 	return e[i].count.Count > e[j].count.Count
 }
 
-func (c *collector) top() []string {
+func (c *collector) top() []entry {
 	counter := make([]entry, 0)
 	for action, count := range c.counter {
 		if count.Count == 0 {
@@ -103,16 +103,11 @@ func (c *collector) top() []string {
 		})
 	}
 	sort.Sort(gallery(counter))
-	lines := make([]string, len(counter))
-	for i, entry := range counter {
-		lines[i] = fmt.Sprintf("[%04d] %s: %d", i+1,
-			entry.action, entry.count.Count)
-	}
-	return lines
+	return counter
 }
 
-func (c *collector) updateStream() chan []string {
-	out := make(chan []string)
+func (c *collector) updateStream() chan []entry {
+	out := make(chan []entry)
 
 	go func() {
 		ticker := time.Tick(1000 * time.Millisecond)
@@ -129,7 +124,7 @@ func (c *collector) updateStream() chan []string {
 	return out
 }
 
-func (c *collector) update() ([]string, error) {
+func (c *collector) update() ([]entry, error) {
 	for name, obj := range c.services {
 		stats, err := obj.Stats()
 		if err != nil {
@@ -181,14 +176,20 @@ func loopTermUI(sess bus.Session, services map[string]bus.ObjectProxy) {
 
 	c := NewCollector(services)
 
-	list := widgets.NewList()
-	list.Title = "Most used methods"
-	list.TextStyle = ui.NewStyle(ui.ColorYellow)
-	list.WrapText = false
-	list.SetRect(0, 0, 25, 8)
-	list.Rows = c.top()
+	table := widgets.NewTable()
+	table.Title = "Most used methods"
+	table.TextStyle = ui.NewStyle(ui.ColorYellow)
+	table.RowSeparator = false
+	table.TextAlignment = ui.AlignLeft
+	table.SetRect(0, 0, 25, 8)
+	table.Rows = [][]string{
+		[]string{
+			"action", "count", "lat min", "lat max", "lat avg",
+		},
+	}
+	table.ColumnResizer()
+	grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, table)))
 
-	grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
 	ui.Render(grid)
 
 	uiEvents := ui.PollEvents()
@@ -196,33 +197,35 @@ func loopTermUI(sess bus.Session, services map[string]bus.ObjectProxy) {
 
 	for {
 		select {
-		case lines, ok := <-updates:
+		case stats, ok := <-updates:
 			if !ok {
 				log.Printf("Remote error")
 				return
 			}
-			list.Rows = lines
-			grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
+			// list.Rows = lines
+			//grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
+
+			table.Rows = make([][]string, len(stats)+1)
+			table.Rows[0] = []string{
+				"action", "count", "lat min", "lat max", "lat avg",
+			}
+			for i, entry := range stats {
+				table.Rows[i+1] = []string{
+					fmt.Sprintf("%s", entry.action),
+					fmt.Sprintf("%d", entry.count.Count),
+					fmt.Sprintf("%.0f", entry.count.Wall.MinValue*1000*1000),
+					fmt.Sprintf("%.0f", entry.count.Wall.MaxValue*1000*1000),
+					fmt.Sprintf("%.0f",
+						entry.count.Wall.CumulatedValue*1000*1000/float32(entry.count.Count)),
+				}
+			}
+			table.ColumnResizer()
+			grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, table)))
+
 		case e := <-uiEvents:
 			switch e.ID {
 			case "q", "<C-c>":
 				return
-			case "j", "<Down>":
-				list.ScrollDown()
-			case "k", "<Up>":
-				list.ScrollUp()
-			case "<C-d>":
-				list.ScrollHalfPageDown()
-			case "<C-u>":
-				list.ScrollHalfPageUp()
-			case "<C-f>":
-				list.ScrollPageDown()
-			case "<C-b>":
-				list.ScrollPageUp()
-			case "<Home>":
-				list.ScrollTop()
-			case "G", "<End>":
-				list.ScrollBottom()
 			case "<Resize>":
 				payload := e.Payload.(ui.Resize)
 				grid.SetRect(0, 0, payload.Width, payload.Height)
