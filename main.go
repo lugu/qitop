@@ -104,7 +104,7 @@ func (c *collector) top() []string {
 	}
 	sort.Sort(gallery(counter))
 	lines := make([]string, len(counter)+1)
-	lines[0] = " count | min (ms) | max (ms) | avg (ms) | Service.Method"
+	lines[0] = " count | min (us) | max (us) | avg (us) | Service.Method"
 	for i, entry := range counter {
 		lines[i+1] = fmt.Sprintf(" %5d | %8.0f | %8.0f | %8.0f | %s",
 			entry.count.Count,
