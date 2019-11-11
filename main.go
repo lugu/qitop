@@ -141,7 +141,6 @@ func (c *collector) update() ([]string, error) {
 	for name, obj := range c.services {
 		stats, err := obj.Stats()
 		if err != nil {
-			log.Print(err)
 			continue
 		}
 		c.updateStat(name, stats)
@@ -258,7 +257,13 @@ func main() {
 
 	proxies := services.Services(sess)
 
-	directory, err := proxies.ServiceDirectory()
+	onDisconnect := func(err error) {
+		if !*bactchMode {
+			ui.Close()
+		}
+		log.Fatalf("Session terminated: %s", err)
+	}
+	directory, err := proxies.ServiceDirectory(onDisconnect)
 	if err != nil {
 		log.Fatal(err)
 	}
