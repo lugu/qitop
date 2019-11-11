@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"sync"
 	"time"
 
 	ui "github.com/gizak/termui/v3"
@@ -17,9 +18,10 @@ import (
 )
 
 type collector struct {
-	services map[string]bus.ObjectProxy
-	counter  map[string]bus.MethodStatistics
-	actions  map[string]string
+	sync.RWMutex // protect services
+	services     map[string]bus.ObjectProxy
+	counter      map[string]bus.MethodStatistics
+	actions      map[string]string
 }
 
 func ignoreAction(id uint32) bool {
@@ -63,7 +65,7 @@ func getObject(sess bus.Session, info services.ServiceInfo) bus.ObjectProxy {
 	return bus.MakeObject(proxy)
 }
 
-func (c *collector) updateStat(name string, statistics map[uint32]bus.MethodStatistics) error {
+func (c *collector) updateStat(name string, statistics map[uint32]bus.MethodStatistics) {
 	for action, stat := range statistics {
 		if ignoreAction(action) {
 			continue
@@ -72,7 +74,6 @@ func (c *collector) updateStat(name string, statistics map[uint32]bus.MethodStat
 		action := c.actions[entry]
 		c.counter[action] = stat
 	}
-	return nil
 }
 
 type entry struct {
@@ -125,8 +126,9 @@ func (c *collector) updateStream() chan []string {
 			<-ticker
 			list, err := c.update()
 			if err != nil {
-				fmt.Print(err)
+				log.Print(err)
 				close(out)
+				return
 			}
 			out <- list
 		}
@@ -135,21 +137,32 @@ func (c *collector) updateStream() chan []string {
 }
 
 func (c *collector) update() ([]string, error) {
+	c.RLock()
 	for name, obj := range c.services {
 		stats, err := obj.Stats()
 		if err != nil {
-			return nil, err
+			log.Print(err)
+			continue
 		}
-		if err := c.updateStat(name, stats); err != nil {
-			return nil, err
-		}
-
+		c.updateStat(name, stats)
 	}
+	c.RUnlock()
 	return c.top(), nil
 }
 
-func loopBatch(sess bus.Session, services map[string]bus.ObjectProxy) {
-	c := NewCollector(services)
+func (c *collector) add(name string, p bus.ObjectProxy) {
+	c.Lock()
+	c.services[name] = p
+	c.Unlock()
+}
+
+func (c *collector) remove(name string) {
+	c.Lock()
+	delete(c.services, name)
+	c.Unlock()
+}
+
+func loopBatch(sess bus.Session, c *collector) {
 	updates := c.updateStream()
 
 	interrupt := make(chan os.Signal, 1)
@@ -162,7 +175,6 @@ func loopBatch(sess bus.Session, services map[string]bus.ObjectProxy) {
 			return
 		case lines, ok := <-updates:
 			if !ok {
-				log.Printf("Remote error")
 				return
 			}
 			for _, line := range lines {
@@ -172,7 +184,7 @@ func loopBatch(sess bus.Session, services map[string]bus.ObjectProxy) {
 	}
 }
 
-func loopTermUI(sess bus.Session, services map[string]bus.ObjectProxy) {
+func loopTermUI(sess bus.Session, c *collector) {
 
 	if err := ui.Init(); err != nil {
 		log.Print(err)
@@ -183,8 +195,6 @@ func loopTermUI(sess bus.Session, services map[string]bus.ObjectProxy) {
 	grid := ui.NewGrid()
 	termWidth, termHeight := ui.TerminalDimensions()
 	grid.SetRect(0, 0, termWidth, termHeight)
-
-	c := NewCollector(services)
 
 	list := widgets.NewList()
 	list.Title = "Most used methods"
@@ -203,7 +213,6 @@ func loopTermUI(sess bus.Session, services map[string]bus.ObjectProxy) {
 		select {
 		case lines, ok := <-updates:
 			if !ok {
-				log.Printf("Remote error")
 				return
 			}
 			list.Rows = lines
@@ -259,11 +268,43 @@ func main() {
 		log.Fatal(err)
 	}
 
+	cancel, added, err := directory.SubscribeServiceAdded()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cancel()
+	cancel, removed, err := directory.SubscribeServiceRemoved()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cancel()
+
 	services := make(map[string]bus.ObjectProxy)
 
 	for _, info := range serviceList {
 		services[info.Name] = getObject(sess, info)
 	}
+	c := NewCollector(services)
+
+	go func() {
+		for {
+			select {
+			case s, ok := <-added:
+				if !ok {
+					return
+				}
+				info, err := directory.Service(s.Name)
+				if err == nil {
+					c.add(info.Name, getObject(sess, info))
+				}
+			case s, ok := <-removed:
+				if !ok {
+					return
+				}
+				c.remove(s.Name)
+			}
+		}
+	}()
 
 	// enable stats
 	for _, obj := range services {
@@ -279,8 +320,8 @@ func main() {
 
 	// print stats
 	if *bactchMode {
-		loopBatch(sess, services)
+		loopBatch(sess, c)
 	} else {
-		loopTermUI(sess, services)
+		loopTermUI(sess, c)
 	}
 }
