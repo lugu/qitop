@@ -1,332 +1,271 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"sort"
-	"sync"
+	"strings"
 	"time"
 
-	ui "github.com/gizak/termui/v3"
-	"github.com/gizak/termui/v3/widgets"
 	"github.com/lugu/qiloop/app"
 	"github.com/lugu/qiloop/bus"
-	"github.com/lugu/qiloop/bus/services"
+	"github.com/mum4k/termdash"
+	"github.com/mum4k/termdash/cell"
+	"github.com/mum4k/termdash/container"
+	"github.com/mum4k/termdash/container/grid"
+	"github.com/mum4k/termdash/keyboard"
+	"github.com/mum4k/termdash/linestyle"
+	"github.com/mum4k/termdash/terminal/termbox"
+	"github.com/mum4k/termdash/terminal/terminalapi"
+
+	"github.com/mum4k/termdash/widgets/linechart"
+	"github.com/mum4k/termdash/widgets/text"
 )
 
-type collector struct {
-	sync.RWMutex // protect services
-	services     map[string]bus.ObjectProxy
-	counter      map[string]bus.MethodStatistics
-	actions      map[string]string
+const (
+	// rootID is the ID assigned to the root container.
+	rootID = "root"
+
+	// redrawInterval is how often termdash redraws the screen.
+	redrawInterval = 250 * time.Millisecond
+)
+
+var (
+	sess bus.Session
+)
+
+// widgets holds the widgets used by this demo.
+type widgets struct {
+	sizePlot    *linechart.LineChart
+	latencyPlot *linechart.LineChart
+	topList     *text.Text
+
+	index   int
+	lines   []string
+	counter []entry
+
+	collector *collector
 }
 
-func ignoreAction(id uint32) bool {
-	if id < 0x50 || id > 0x53 {
-		return false
+func (w *widgets) key(k *terminalapi.Keyboard) error {
+	if k.Key == 'k' {
+		if w.index > 0 {
+			w.index--
+		}
+		w.updateTopList()
 	}
-	return true
-}
-
-func NewCollector(services map[string]bus.ObjectProxy) *collector {
-
-	c := &collector{
-		services: services,
-		counter:  make(map[string]bus.MethodStatistics),
-		actions:  make(map[string]string),
+	if k.Key == 'j' {
+		if w.index < len(w.lines)-1 {
+			w.index++
+		}
+		w.updateTopList()
 	}
-
-	for servicename, obj := range services {
-		meta, err := obj.MetaObject(obj.ObjectID())
+	if k.Key == keyboard.KeyEnter {
+		if w.index == 0 {
+			return nil
+		}
+		line := w.lines[w.index]
+		labels := strings.SplitN(line, " | ", 5)
+		if len(labels) != 5 {
+			return fmt.Errorf("invalid line: %s", line)
+		}
+		desc := strings.SplitN(labels[4], ".", 2)
+		if len(desc) != 2 {
+			return fmt.Errorf("invalid service.action: %s", labels[4])
+		}
+		if w.collector != nil {
+			w.collector.cancel()
+			w.collector = nil
+		}
+		collector, err := newCollector(sess, w, desc[0], desc[1])
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
-		for id, method := range meta.Methods {
-			if ignoreAction(id) {
-				continue
-			}
-			actionID := fmt.Sprintf("%s.%d", servicename, id)
-			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
-			c.actions[actionID] = actionName
-			c.counter[actionName] = bus.MethodStatistics{}
+		w.collector = collector
+	}
+	return nil
+}
+
+func (w *widgets) refreshTopList(lines []string) error {
+	w.lines = lines
+	w.updateTopList()
+	return nil
+}
+
+func (w *widgets) updateTopList() {
+	w.topList.Reset()
+	for i, line := range w.lines {
+		l := fmt.Sprintf("%s\n", line)
+		if i == w.index {
+			opt := text.WriteCellOpts(cell.FgColor(cell.ColorYellow))
+			w.topList.Write(l, opt)
+		} else {
+			w.topList.Write(l)
 		}
 	}
-	return c
 }
 
-func getObject(sess bus.Session, info services.ServiceInfo) bus.ObjectProxy {
-	proxy, err := sess.Proxy(info.Name, 1)
-	if err != nil {
-		log.Fatalf("failed to connect service (%s): %s", info.Name, err)
-	}
-	return bus.MakeObject(proxy)
-}
-
-func (c *collector) updateStat(name string, statistics map[uint32]bus.MethodStatistics) {
-	for action, stat := range statistics {
-		if ignoreAction(action) {
-			continue
-		}
-		entry := fmt.Sprintf("%s.%d", name, action)
-		action := c.actions[entry]
-		c.counter[action] = stat
-	}
-}
-
-type entry struct {
-	count  bus.MethodStatistics
-	action string
-}
-type gallery []entry
-
-func (e gallery) Len() int      { return len(e) }
-func (e gallery) Swap(i, j int) { e[i], e[j] = e[j], e[i] }
-func (e gallery) Less(i, j int) bool {
-	if e[i].count.Count == e[j].count.Count {
-		return e[i].count.Wall.CumulatedValue >
-			e[j].count.Wall.CumulatedValue
-	}
-	return e[i].count.Count > e[j].count.Count
-}
-
-func (c *collector) top() []string {
-	counter := make([]entry, 0)
-	for action, count := range c.counter {
-		if count.Count == 0 {
-			continue
-		}
-		counter = append(counter, entry{
-			action: action,
-			count:  count,
-		})
-	}
-	sort.Sort(gallery(counter))
-	lines := make([]string, len(counter)+1)
-	lines[0] = " count | min (us) | max (us) | avg (us) | Service.Method"
-	for i, entry := range counter {
-		lines[i+1] = fmt.Sprintf(" %5d | %8.0f | %8.0f | %8.0f | %s",
-			entry.count.Count,
-			entry.count.Wall.MinValue*1000000.0,
-			entry.count.Wall.MaxValue*1000000.0,
-			entry.count.Wall.CumulatedValue*1000000.0/float32(entry.count.Count),
-			entry.action)
-	}
-	return lines
-}
-
-func (c *collector) updateStream() chan []string {
-	out := make(chan []string)
-
-	go func() {
-		ticker := time.Tick(1000 * time.Millisecond)
-		for {
-			<-ticker
-			list, err := c.update()
-			if err != nil {
-				log.Print(err)
-				close(out)
-				return
-			}
-			out <- list
-		}
-	}()
-	return out
-}
-
-func (c *collector) update() ([]string, error) {
-	c.RLock()
-	for name, obj := range c.services {
-		stats, err := obj.Stats()
-		if err != nil {
-			continue
-		}
-		c.updateStat(name, stats)
-	}
-	c.RUnlock()
-	return c.top(), nil
-}
-
-func (c *collector) add(name string, p bus.ObjectProxy) {
-	c.Lock()
-	c.services[name] = p
-	c.Unlock()
-}
-
-func (c *collector) remove(name string) {
-	c.Lock()
-	delete(c.services, name)
-	c.Unlock()
-}
-
-func loopBatch(sess bus.Session, c *collector) {
-	updates := c.updateStream()
-
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-
+// periodic executes the provided closure periodically every interval.
+// Exits when the context expires.
+func periodic(ctx context.Context, interval time.Duration, fn func() error) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
-		case s := <-interrupt:
-			log.Printf("%v: quitting.", s)
+		case <-ticker.C:
+			if err := fn(); err != nil {
+				panic(err)
+			}
+		case <-ctx.Done():
 			return
-		case lines, ok := <-updates:
-			if !ok {
-				return
-			}
-			for _, line := range lines {
-				fmt.Printf("%s\n", line)
-			}
 		}
 	}
 }
 
-func loopTermUI(sess bus.Session, c *collector) {
-
-	if err := ui.Init(); err != nil {
-		log.Print(err)
-		return
+func newTopList(ctx context.Context) (*text.Text, error) {
+	t, err := text.New(text.RollContent())
+	if err != nil {
+		return nil, err
 	}
-	defer ui.Close()
+	return t, nil
+}
 
-	grid := ui.NewGrid()
-	termWidth, termHeight := ui.TerminalDimensions()
-	grid.SetRect(0, 0, termWidth, termHeight)
-
-	list := widgets.NewList()
-	list.Title = "Most used methods"
-	list.TextStyle = ui.NewStyle(ui.ColorYellow)
-	list.WrapText = false
-	list.SetRect(0, 0, 25, 8)
-	list.Rows = c.top()
-
-	grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
-	ui.Render(grid)
-
-	uiEvents := ui.PollEvents()
-	updates := c.updateStream()
-
-	for {
-		select {
-		case lines, ok := <-updates:
-			if !ok {
-				return
-			}
-			list.Rows = lines
-			grid.Set(ui.NewRow(1.0, ui.NewCol(1.0, list)))
-		case e := <-uiEvents:
-			switch e.ID {
-			case "q", "<C-c>":
-				return
-			case "j", "<Down>":
-				list.ScrollDown()
-			case "k", "<Up>":
-				list.ScrollUp()
-			case "<C-d>":
-				list.ScrollHalfPageDown()
-			case "<C-u>":
-				list.ScrollHalfPageUp()
-			case "<C-f>":
-				list.ScrollPageDown()
-			case "<C-b>":
-				list.ScrollPageUp()
-			case "<Home>":
-				list.ScrollTop()
-			case "G", "<End>":
-				list.ScrollBottom()
-			case "<Resize>":
-				payload := e.Payload.(ui.Resize)
-				grid.SetRect(0, 0, payload.Width, payload.Height)
-				ui.Clear()
-			}
-		}
-		ui.Render(grid)
+func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
+	p, err := linechart.New(
+		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
+		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+	)
+	if err != nil {
+		return nil, err
 	}
+	return p, nil
+}
+
+func newLatencyPlot(ctx context.Context) (*linechart.LineChart, error) {
+	p, err := linechart.New(
+		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
+		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// newWidgets creates all widgets used.
+func newWidgets(ctx context.Context, c *container.Container) (*widgets, error) {
+
+	topList, err := newTopList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sizePlot, err := newSizePlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latencyPlot, err := newLatencyPlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &widgets{
+		topList:     topList,
+		sizePlot:    sizePlot,
+		latencyPlot: latencyPlot,
+	}, nil
+
+}
+
+func gridLayout(w *widgets) ([]container.Option, error) {
+
+	elements := []grid.Element{
+		grid.ColWidthPerc(50,
+			grid.Widget(w.topList,
+				container.Border(linestyle.Light),
+				container.BorderTitle("Top"),
+			),
+		),
+		grid.ColWidthPerc(50,
+			grid.RowHeightPerc(50,
+				grid.Widget(w.latencyPlot),
+			),
+			grid.RowHeightPerc(50,
+				grid.Widget(w.sizePlot),
+			),
+		),
+	}
+	builder := grid.New()
+	builder.Add(elements...)
+	gridOpts, err := builder.Build()
+	if err != nil {
+		return nil, err
+	}
+	return gridOpts, nil
 }
 
 func main() {
-	var bactchMode = flag.Bool("b", false, "batch mode (default disable)")
+
 	flag.Parse()
-
-	sess, err := app.SessionFromFlag()
+	var err error
+	sess, err = app.SessionFromFlag()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
-	proxies := services.Services(sess)
+	t, err := termbox.New(termbox.ColorMode(terminalapi.ColorMode256))
+	if err != nil {
+		panic(err)
+	}
+	defer t.Close()
 
-	onDisconnect := func(err error) {
-		if !*bactchMode {
-			ui.Close()
+	c, err := container.New(t, container.ID(rootID))
+	if err != nil {
+		panic(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	w, err := newWidgets(ctx, c)
+	if err != nil {
+		panic(err)
+	}
+
+	updater, err := statUpdater(ctx, sess, cancel)
+	if err != nil {
+		panic(err)
+	}
+
+	go periodic(ctx, 1*time.Second, func() error {
+		lines, err := updater()
+		if err != nil {
+			return err
 		}
-		log.Fatalf("Session terminated: %s", err)
-	}
-	directory, err := proxies.ServiceDirectory(onDisconnect)
+		return w.refreshTopList(lines)
+	})
+
+	gridOpts, err := gridLayout(w) // equivalent to contLayout(w)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
-	serviceList, err := directory.Services()
-	if err != nil {
-		log.Fatal(err)
+	if err := c.Update(rootID, gridOpts...); err != nil {
+		panic(err)
 	}
 
-	cancel, added, err := directory.SubscribeServiceAdded()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer cancel()
-	cancel, removed, err := directory.SubscribeServiceRemoved()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer cancel()
-
-	services := make(map[string]bus.ObjectProxy)
-
-	for _, info := range serviceList {
-		services[info.Name] = getObject(sess, info)
-	}
-	c := NewCollector(services)
-
-	go func() {
-		for {
-			select {
-			case s, ok := <-added:
-				if !ok {
-					return
-				}
-				info, err := directory.Service(s.Name)
-				if err == nil {
-					c.add(info.Name, getObject(sess, info))
-				}
-			case s, ok := <-removed:
-				if !ok {
-					return
-				}
-				c.remove(s.Name)
-			}
+	quitter := func(k *terminalapi.Keyboard) {
+		err := w.key(k)
+		if err != nil {
+			cancel()
+			log.Fatal(err)
 		}
-	}()
-
-	// enable stats
-	for _, obj := range services {
-		obj.EnableStats(true)
-		obj.ClearStats()
-
-	}
-	defer func() {
-		for _, obj := range services {
-			obj.EnableStats(false)
+		if k.Key == keyboard.KeyEsc || k.Key == keyboard.KeyCtrlC {
+			cancel()
 		}
-	}()
-
-	// print stats
-	if *bactchMode {
-		loopBatch(sess, c)
-	} else {
-		loopTermUI(sess, c)
+	}
+	if err := termdash.Run(ctx, t, c, termdash.KeyboardSubscriber(quitter),
+		termdash.RedrawInterval(redrawInterval)); err != nil {
+		panic(err)
 	}
 }
