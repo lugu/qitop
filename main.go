@@ -49,19 +49,18 @@ type widgets struct {
 }
 
 func (w *widgets) key(k *terminalapi.Keyboard) error {
-	if k.Key == 'k' {
+	switch k.Key {
+	case 'k', keyboard.KeyArrowUp:
 		if w.index > 0 {
 			w.index--
 		}
 		w.updateTopList()
-	}
-	if k.Key == 'j' {
+	case 'j', keyboard.KeyArrowDown:
 		if w.index < len(w.lines)-1 {
 			w.index++
 		}
 		w.updateTopList()
-	}
-	if k.Key == keyboard.KeyEnter {
+	case keyboard.KeyEnter:
 		if w.index == 0 {
 			return nil
 		}
