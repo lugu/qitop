@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 
 	"github.com/lugu/qiloop/bus"
@@ -27,12 +26,12 @@ func (e gallery) Less(i, j int) bool {
 	return e[i].count.Count > e[j].count.Count
 }
 
-func getObject(sess bus.Session, info services.ServiceInfo) bus.ObjectProxy {
+func getObject(sess bus.Session, info services.ServiceInfo) (bus.ObjectProxy, error) {
 	proxy, err := sess.Proxy(info.Name, 1)
 	if err != nil {
-		log.Fatalf("failed to connect service (%s): %s", info.Name, err)
+		return nil, fmt.Errorf("failed to connect service (%s): %s", info.Name, err)
 	}
-	return bus.MakeObject(proxy)
+	return bus.MakeObject(proxy), nil
 }
 
 func ignoreAction(id uint32) bool {
@@ -47,17 +46,19 @@ func statUpdater(ctx context.Context, sess bus.Session, cancel context.CancelFun
 	proxies := services.Services(sess)
 
 	onDisconnect := func(err error) {
+		mainErr = fmt.Errorf("Service directory disconnection: %s", err)
 		cancel()
-		log.Fatalf("Session terminated: %s", err)
 	}
 	directory, err := proxies.ServiceDirectory(onDisconnect)
 	if err != nil {
-		log.Fatal(err)
+		mainErr = err
+		cancel()
 	}
 
 	serviceList, err := directory.Services()
 	if err != nil {
-		log.Fatal(err)
+		mainErr = err
+		cancel()
 	}
 
 	services := map[string]bus.ObjectProxy{}
@@ -65,13 +66,18 @@ func statUpdater(ctx context.Context, sess bus.Session, cancel context.CancelFun
 	actions := map[string]string{}
 
 	for _, info := range serviceList {
-		services[info.Name] = getObject(sess, info)
+		services[info.Name], err = getObject(sess, info)
+		if err != nil {
+			mainErr = err
+			cancel()
+		}
 	}
 
 	for servicename, obj := range services {
 		meta, err := obj.MetaObject(obj.ObjectID())
 		if err != nil {
-			log.Fatal(err)
+			mainErr = err
+			cancel()
 		}
 		for id, method := range meta.Methods {
 			if ignoreAction(id) {

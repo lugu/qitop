@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"strings"
 	"time"
@@ -32,7 +33,8 @@ const (
 )
 
 var (
-	sess bus.Session
+	sess    bus.Session
+	mainErr error = nil
 )
 
 // widgets holds the widgets used by this demo.
@@ -86,10 +88,9 @@ func (w *widgets) key(k *terminalapi.Keyboard) error {
 	return nil
 }
 
-func (w *widgets) refreshTopList(lines []string) error {
+func (w *widgets) refreshTopList(lines []string) {
 	w.lines = lines
 	w.updateTopList()
-	return nil
 }
 
 func (w *widgets) updateTopList() {
@@ -107,15 +108,13 @@ func (w *widgets) updateTopList() {
 
 // periodic executes the provided closure periodically every interval.
 // Exits when the context expires.
-func periodic(ctx context.Context, interval time.Duration, fn func() error) {
+func periodic(ctx context.Context, interval time.Duration, fn func()) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			if err := fn(); err != nil {
-				panic(err)
-			}
+			fn()
 		case <-ctx.Done():
 			return
 		}
@@ -132,6 +131,7 @@ func newTopList(ctx context.Context) (*text.Text, error) {
 
 func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
+		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" b")),
 		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
 		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
 		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
@@ -144,6 +144,7 @@ func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
 
 func newLatencyPlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
+		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" µs")),
 		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
 		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
 		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
@@ -183,15 +184,23 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 		grid.ColWidthPerc(50,
 			grid.Widget(w.topList,
 				container.Border(linestyle.Light),
-				container.BorderTitle("Top"),
+				container.BorderTitle("Most used methods"),
 			),
 		),
 		grid.ColWidthPerc(50,
 			grid.RowHeightPerc(50,
-				grid.Widget(w.latencyPlot),
+				grid.Widget(w.latencyPlot,
+					container.Border(linestyle.Light),
+					container.BorderTitle("Latency (microseconds)"),
+					container.BorderTitleAlignRight(),
+				),
 			),
 			grid.RowHeightPerc(50,
-				grid.Widget(w.sizePlot),
+				grid.Widget(w.sizePlot,
+					container.Border(linestyle.Light),
+					container.BorderTitle("Message size (byte)"),
+					container.BorderTitleAlignRight(),
+				),
 			),
 		),
 	}
@@ -204,67 +213,85 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 	return gridOpts, nil
 }
 
-func main() {
+func run() error {
 
 	flag.Parse()
 	var err error
 	sess, err = app.SessionFromFlag()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	t, err := termbox.New(termbox.ColorMode(terminalapi.ColorMode256))
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer t.Close()
 
+	logger := log.Writer()
+	log.SetOutput(ioutil.Discard)
+	defer log.SetOutput(logger)
+
 	c, err := container.New(t, container.ID(rootID))
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	w, err := newWidgets(ctx, c)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	updater, err := statUpdater(ctx, sess, cancel)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	go periodic(ctx, 1*time.Second, func() error {
+	go periodic(ctx, 1*time.Second, func() {
 		lines, err := updater()
 		if err != nil {
-			return err
+			mainErr = err
+			cancel()
 		}
-		return w.refreshTopList(lines)
+		w.refreshTopList(lines)
 	})
 
 	gridOpts, err := gridLayout(w) // equivalent to contLayout(w)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	if err := c.Update(rootID, gridOpts...); err != nil {
-		panic(err)
+		return err
 	}
 
 	quitter := func(k *terminalapi.Keyboard) {
 		err := w.key(k)
 		if err != nil {
+			mainErr = err
 			cancel()
-			log.Fatal(err)
 		}
 		if k.Key == keyboard.KeyEsc || k.Key == keyboard.KeyCtrlC {
 			cancel()
 		}
 	}
+
 	if err := termdash.Run(ctx, t, c, termdash.KeyboardSubscriber(quitter),
 		termdash.RedrawInterval(redrawInterval)); err != nil {
-		panic(err)
+		return err
+	}
+
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+	if mainErr != nil {
+		log.Fatal(mainErr)
 	}
 }
