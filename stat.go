@@ -157,14 +157,12 @@ func statUpdater(ctx context.Context, sess bus.Session, cancel context.CancelFun
 	}
 	directory, err := proxies.ServiceDirectory(onDisconnect)
 	if err != nil {
-		mainErr = err
-		cancel()
+		return nil, err
 	}
 
 	serviceList, err := directory.Services()
 	if err != nil {
-		mainErr = err
-		cancel()
+		return nil, err
 	}
 
 	services := map[string]bus.ObjectProxy{}
@@ -174,16 +172,14 @@ func statUpdater(ctx context.Context, sess bus.Session, cancel context.CancelFun
 	for _, info := range serviceList {
 		services[info.Name], err = getObject(sess, info)
 		if err != nil {
-			mainErr = err
-			cancel()
+			return nil, err
 		}
 	}
 
 	for servicename, obj := range services {
 		meta, err := obj.MetaObject(obj.ObjectID())
 		if err != nil {
-			mainErr = err
-			cancel()
+			return nil, err
 		}
 		for id, method := range meta.Methods {
 			if ignoreAction(id) {
