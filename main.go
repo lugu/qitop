@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/lugu/qiloop/app"
 	"github.com/lugu/qiloop/bus"
+	qilog "github.com/lugu/qiloop/bus/logger"
 	"github.com/mum4k/termdash"
 	"github.com/mum4k/termdash/cell"
 	"github.com/mum4k/termdash/container"
@@ -47,12 +49,17 @@ const (
 var (
 	sess bus.Session
 
+	// log level displayed
+	logLevel qilog.LogLevel
+
+	// application error status
 	mainErr error = nil
 )
 
 // widgets holds the widgets used by this demo.
 type widgets struct {
 	topList     *text.Text
+	logScroll   *text.Text
 	latencyPlot *linechart.LineChart
 	timePlot    *linechart.LineChart
 	sizePlot    *linechart.LineChart
@@ -62,6 +69,7 @@ type widgets struct {
 	counter []entry
 
 	collector *collector
+	logger    *logger
 }
 
 func (w *widgets) refreshTopList(lines []string) {
@@ -97,7 +105,16 @@ func periodic(ctx context.Context, interval time.Duration, fn func()) {
 	}
 }
 
+func newLogScroll(ctx context.Context) (*text.Text, error) {
+	t, err := text.New(text.RollContent())
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 func newTopList(ctx context.Context) (*text.Text, error) {
+	// FIXME: implement method list roll content
 	t, err := text.New(text.RollContent())
 	if err != nil {
 		return nil, err
@@ -144,6 +161,10 @@ func newWidgets(ctx context.Context, c *container.Container) (*widgets, error) {
 	if err != nil {
 		return nil, err
 	}
+	logScroll, err := newLogScroll(ctx)
+	if err != nil {
+		return nil, err
+	}
 	sizePlot, err := newSizePlot(ctx)
 	if err != nil {
 		return nil, err
@@ -158,6 +179,7 @@ func newWidgets(ctx context.Context, c *container.Container) (*widgets, error) {
 	}
 	return &widgets{
 		topList:     topList,
+		logScroll:   logScroll,
 		sizePlot:    sizePlot,
 		latencyPlot: latencyPlot,
 		timePlot:    timePlot,
@@ -210,6 +232,45 @@ func gridLayout(w *widgets, layout layoutType) ([]container.Option, error) {
 			),
 		}
 	case layoutTopTraceLogs:
+		elements = []grid.Element{
+			grid.ColWidthPerc(50,
+				grid.RowHeightPerc(50,
+					grid.Widget(w.topList,
+						container.Border(linestyle.Light),
+						container.BorderTitle("Most used methods"),
+					),
+				),
+				grid.RowHeightPerc(50,
+					grid.Widget(w.logScroll,
+						container.Border(linestyle.Light),
+						container.BorderTitle("Process logs"),
+					),
+				),
+			),
+			grid.ColWidthPerc(50,
+				grid.RowHeightPerc(33,
+					grid.Widget(w.latencyPlot,
+						container.Border(linestyle.Light),
+						container.BorderTitle("Latency (microseconds): reply (yellow), error (red)"),
+						container.BorderTitleAlignRight(),
+					),
+				),
+				grid.RowHeightPerc(33,
+					grid.Widget(w.timePlot,
+						container.Border(linestyle.Light),
+						container.BorderTitle("CPU time: user (green), system (yellow)"),
+						container.BorderTitleAlignRight(),
+					),
+				),
+				grid.RowHeightPerc(33,
+					grid.Widget(w.sizePlot,
+						container.Border(linestyle.Light),
+						container.BorderTitle("Messages: call size (green), response size (yellow)"),
+						container.BorderTitleAlignRight(),
+					),
+				),
+			),
+		}
 	}
 
 	builder := grid.New()
@@ -251,9 +312,13 @@ func key(c *container.Container, w *widgets, k *terminalapi.Keyboard) error {
 				w.collector.cancel()
 				w.collector = nil
 			}
+			if w.logger != nil {
+				w.logger.cancel()
+				w.logger = nil
+			}
 			return nil
 		}
-		setLayout(c, w, layoutTopTrace)
+		setLayout(c, w, layoutTopTraceLogs)
 
 		line := w.lines[w.index]
 		labels := strings.SplitN(line, " | ", 5)
@@ -264,31 +329,60 @@ func key(c *container.Container, w *widgets, k *terminalapi.Keyboard) error {
 		if len(desc) != 2 {
 			return fmt.Errorf("invalid service.action: %s", labels[4])
 		}
-		if w.collector != nil {
-			w.collector.cancel()
-			w.collector = nil
-		}
-		collector, err := newCollector(sess, w, desc[0], desc[1])
+		err := selectMethod(c, w, desc[0], desc[1])
 		if err != nil {
-			return err
 		}
-		w.collector = collector
 	}
+	return nil
+}
+
+func selectMethod(c *container.Container, w *widgets, service, method string) error {
+
+	if w.collector != nil {
+		w.collector.cancel()
+		w.collector = nil
+	}
+	if w.logger != nil {
+		w.logger.cancel()
+		w.logger = nil
+	}
+
+	collector, err := newCollector(sess, w, service, method)
+	if err != nil {
+		return err
+	}
+	logger, err := newLogger(sess, w, service, method)
+	if err != nil {
+		return err
+	}
+	w.collector = collector
+	w.logger = logger
 	return nil
 }
 
 func run() error {
 	var service string
 	var method string
+	var logFile string
+
+	var level int
+	logLevelInfo := "log level, 1:fatal, 2:error, 3:warning, 4:info, 5:verbose, 6:debug"
 
 	flag.StringVar(&service, "service", "", "service name")
 	flag.StringVar(&method, "method", "", "method name")
+	flag.IntVar(&level, "log-level", 5, logLevelInfo)
+	flag.StringVar(&logFile, "log-file", "", "file where to write qitop logs")
+
+	if level < 0 || level > 6 {
+		return fmt.Errorf("invalid log level")
+	}
+	logLevel = qilog.LogLevel{Level: int32(level)}
 
 	flag.Parse()
 	var err error
 	sess, err = app.SessionFromFlag()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	t, err := termbox.New(termbox.ColorMode(terminalapi.ColorMode256))
@@ -298,9 +392,16 @@ func run() error {
 	defer t.Close()
 
 	log.SetFlags(0)
-	logger := log.Writer()
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(logger)
+	logger := ioutil.Discard
+	if logFile != "" {
+		var flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		logger, err = os.OpenFile(logFile, flag, 0600)
+		if err != nil {
+			return err
+		}
+	}
+	defer log.SetOutput(log.Writer())
+	log.SetOutput(logger)
 
 	c, err := container.New(t, container.ID(rootID))
 	if err != nil {
@@ -330,12 +431,11 @@ func run() error {
 	})
 
 	if service != "" && method != "" {
-		collector, err := newCollector(sess, w, service, method)
+		selectMethod(c, w, service, method)
 		if err != nil {
 			return err
 		}
-		w.collector = collector
-		setLayout(c, w, layoutTopTrace)
+		setLayout(c, w, layoutTopTraceLogs)
 	} else {
 		setLayout(c, w, layoutTop)
 	}

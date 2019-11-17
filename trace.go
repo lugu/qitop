@@ -106,6 +106,7 @@ func newCollector(sess bus.Session, w *widgets, service, action string) (*collec
 		usrTimeData:      []float64{},
 	}
 
+	// TODO: return a runner to a to the group.Run
 	go func(events chan bus.EventTrace) {
 		for {
 			e, ok := <-events
