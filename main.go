@@ -59,6 +59,7 @@ var (
 type widgets struct {
 	topList     *text.Text
 	logScroll   *text.Text
+	serviceInfo *text.Text
 	latencyPlot *linechart.LineChart
 	timePlot    *linechart.LineChart
 	sizePlot    *linechart.LineChart
@@ -66,9 +67,26 @@ type widgets struct {
 	highlight *highlight
 	collector *collector
 	logger    *logger
+	info      *info
 }
 
 func newLogScroll(ctx context.Context) (*text.Text, error) {
+	t, err := text.New(
+		text.RollContent(),
+		text.ScrollKeys(
+			keyboard.KeyDelete,
+			keyboard.KeySpace,
+			keyboard.KeyPgUp,
+			keyboard.KeyPgDn,
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func newServiceInfo(ctx context.Context) (*text.Text, error) {
 	t, err := text.New(text.RollContent())
 	if err != nil {
 		return nil, err
@@ -128,6 +146,10 @@ func newWidgets(ctx context.Context, cancel context.CancelFunc, c *container.Con
 	if err != nil {
 		return nil, err
 	}
+	serviceInfo, err := newServiceInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
 	sizePlot, err := newSizePlot(ctx)
 	if err != nil {
 		return nil, err
@@ -140,9 +162,11 @@ func newWidgets(ctx context.Context, cancel context.CancelFunc, c *container.Con
 	if err != nil {
 		return nil, err
 	}
+	serviceInfo.Write("hello\nworld")
 	return &widgets{
 		topList:     topList,
 		logScroll:   logScroll,
+		serviceInfo: serviceInfo,
 		sizePlot:    sizePlot,
 		latencyPlot: latencyPlot,
 		timePlot:    timePlot,
@@ -211,6 +235,11 @@ func gridLayout(w *widgets, layout layoutType) ([]container.Option, error) {
 				),
 			),
 			grid.ColWidthPerc(50,
+				grid.RowHeightFixed(2,
+					grid.Widget(w.serviceInfo,
+						container.Border(linestyle.None),
+					),
+				),
 				grid.RowHeightPerc(33,
 					grid.Widget(w.latencyPlot,
 						container.Border(linestyle.Light),
@@ -275,8 +304,13 @@ func selectMethod(c *container.Container, w *widgets, service, method string) er
 	if err != nil {
 		return err
 	}
+	info, err := newInfo(sess, w, service, method)
+	if err != nil {
+		return err
+	}
 	w.collector = collector
 	w.logger = logger
+	w.info = info
 	return nil
 }
 

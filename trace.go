@@ -44,7 +44,7 @@ func newCallEvent(call, response bus.EventTrace) callEvent {
 
 type collector struct {
 	service string
-	action  string
+	method  string
 	slot    uint32
 
 	callData         []float64
@@ -60,7 +60,7 @@ type collector struct {
 	pending map[uint32]bus.EventTrace
 }
 
-func newCollector(sess bus.Session, w *widgets, service, action string) (*collector, error) {
+func newCollector(sess bus.Session, w *widgets, service, method string) (*collector, error) {
 	objectID := uint32(1)
 	proxy, err := sess.Proxy(service, objectID)
 	if err != nil {
@@ -73,9 +73,9 @@ func newCollector(sess bus.Session, w *widgets, service, action string) (*collec
 		return nil, fmt.Errorf("%s: MetaObject: %s.", service, err)
 	}
 
-	slot, err := meta.MethodID(action)
+	slot, err := meta.MethodID(method)
 	if err != nil {
-		return nil, fmt.Errorf("method not found: %s.", action)
+		return nil, fmt.Errorf("method not found: %s.", method)
 	}
 
 	obj.EnableTrace(true)
@@ -90,7 +90,7 @@ func newCollector(sess bus.Session, w *widgets, service, action string) (*collec
 
 	c := &collector{
 		service: service,
-		action:  action,
+		method:  method,
 		slot:    slot,
 
 		cancel: cancel,
