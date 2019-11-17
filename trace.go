@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/lugu/qiloop/bus"
@@ -12,10 +13,33 @@ import (
 )
 
 type callEvent struct {
-	timestamp time.Time
-	duration  time.Duration
-	callSize  int
-	replySize int
+	timestamp    time.Time
+	duration     time.Duration
+	callSize     int
+	replySize    int
+	userUsTime   int64
+	systemUsTime int64
+	responseType uint8
+}
+
+func newCallEvent(call, response bus.EventTrace) callEvent {
+
+	if uint8(call.Kind) != net.Call {
+		panic(call)
+	}
+
+	since := time.Unix(call.Timestamp.Tv_sec, call.Timestamp.Tv_usec*1000)
+	until := time.Unix(response.Timestamp.Tv_sec, response.Timestamp.Tv_usec*1000)
+
+	return callEvent{
+		timestamp:    since,
+		duration:     until.Sub(since),
+		callSize:     net.HeaderSize + len(value.Bytes(call.Arguments)),
+		replySize:    net.HeaderSize + len(value.Bytes(response.Arguments)),
+		userUsTime:   response.UserUsTime,
+		systemUsTime: response.SystemUsTime,
+		responseType: uint8(response.Kind),
+	}
 }
 
 type collector struct {
@@ -23,14 +47,17 @@ type collector struct {
 	action  string
 	slot    uint32
 
-	callData    []float64
-	replyData   []float64
-	latencyData []float64
+	callData         []float64
+	replyData        []float64
+	latencyData      []float64
+	latencyErrorData []float64
+	sysTimeData      []float64
+	usrTimeData      []float64
 
 	cancel func()
 
-	pending map[uint32]callEvent
 	records []callEvent
+	pending map[uint32]bus.EventTrace
 }
 
 func newCollector(sess bus.Session, w *widgets, service, action string) (*collector, error) {
@@ -68,12 +95,15 @@ func newCollector(sess bus.Session, w *widgets, service, action string) (*collec
 
 		cancel: cancel,
 
-		pending: map[uint32]callEvent{},
+		pending: map[uint32]bus.EventTrace{},
 		records: []callEvent{},
 
-		callData:    []float64{},
-		replyData:   []float64{},
-		latencyData: []float64{},
+		callData:         []float64{},
+		replyData:        []float64{},
+		latencyData:      []float64{},
+		latencyErrorData: []float64{},
+		sysTimeData:      []float64{},
+		usrTimeData:      []float64{},
 	}
 
 	go func(events chan bus.EventTrace) {
@@ -91,66 +121,75 @@ func newCollector(sess bus.Session, w *widgets, service, action string) (*collec
 	return c, nil
 }
 
+func (c *collector) updateData(evt callEvent) {
+	c.records = append(c.records, evt)
+
+	if evt.responseType == net.Reply {
+		c.latencyData = append(c.latencyData, float64(evt.duration.Microseconds()))
+		c.latencyErrorData = append(c.latencyErrorData, math.NaN())
+	} else {
+		c.latencyData = append(c.latencyData, math.NaN())
+		c.latencyErrorData = append(c.latencyErrorData, float64(evt.duration.Microseconds()))
+	}
+	c.sysTimeData = append(c.sysTimeData, float64(evt.systemUsTime))
+	c.usrTimeData = append(c.usrTimeData, float64(evt.userUsTime))
+	c.callData = append(c.callData, float64(evt.callSize))
+	c.replyData = append(c.replyData, float64(evt.replySize))
+}
+
 func (c *collector) refreshData(e bus.EventTrace) {
 	if e.SlotId != c.slot {
 		return
 	}
 
-	size := 24 + len(value.Bytes(e.Arguments))
-	ts := time.Unix(e.Timestamp.Tv_sec, e.Timestamp.Tv_usec*1000)
-
-	switch e.Kind {
-	case int32(net.Call):
-		c.callData = append(c.callData, float64(size))
-		c.pending[e.Id] = callEvent{
-			timestamp: ts,
-			callSize:  size,
-		}
-	case int32(net.Reply):
-		c.replyData = append(c.replyData, float64(size))
-		call, ok := c.pending[e.Id]
-		if !ok {
-			break
-		}
-		call.replySize = size
-
-		if ts.Before(call.timestamp) {
-			delete(c.pending, e.Id)
-			break
-		}
-
-		call.duration = ts.Sub(call.timestamp)
-		delete(c.pending, e.Id)
-		c.records = append(c.records, call)
-
-		c.latencyData = append(c.latencyData,
-			float64(call.duration.Microseconds()))
-	case int32(net.Error): // TODO
+	e0, ok := c.pending[e.Id]
+	if !ok {
+		c.pending[e.Id] = e
+		return
 	}
+	delete(c.pending, e.Id)
+
+	call, response := e0, e
+	if e.Kind == int32(net.Call) {
+		call, response = e, e0
+	}
+	c.updateData(newCallEvent(call, response))
+}
+
+func noMoreThan(max int, data []float64) []float64 {
+	start := 0
+	if max == 0 {
+		return []float64{}
+	}
+	if max > 0 && max < len(data) {
+		start = len(data) - max
+	}
+	return data[start:]
 }
 
 func (c *collector) updateUI(w *widgets) {
-	dx := w.sizePlot.ValueCapacity()
-	start := 0
-	if dx != 0 && dx < len(c.callData) {
-		start = len(c.callData) - dx
-	}
-	w.sizePlot.Series("call size (byte)",
-		c.callData[start:],
-		linechart.SeriesCellOpts(cell.FgColor(cell.ColorBlue)),
+	w.latencyPlot.Series("response time",
+		noMoreThan(w.latencyPlot.ValueCapacity(), c.latencyData),
+		linechart.SeriesCellOpts(cell.FgColor(cell.ColorYellow)),
 	)
-	w.sizePlot.Series("reply size (byte)",
-		c.replyData[start:],
+	w.latencyPlot.Series("error response time",
+		noMoreThan(w.latencyPlot.ValueCapacity(), c.latencyErrorData),
+		linechart.SeriesCellOpts(cell.FgColor(cell.ColorRed)),
+	)
+	w.timePlot.Series("user time",
+		noMoreThan(w.timePlot.ValueCapacity(), c.usrTimeData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorGreen)),
 	)
-
-	dx = w.latencyPlot.ValueCapacity()
-	start = 0
-	if dx != 0 && dx < len(c.latencyData) {
-		start = len(c.latencyData) - dx
-	}
-	w.latencyPlot.Series("response time (us)",
-		c.latencyData[start:],
+	w.timePlot.Series("system time",
+		noMoreThan(w.timePlot.ValueCapacity(), c.sysTimeData),
+		linechart.SeriesCellOpts(cell.FgColor(cell.ColorYellow)),
+	)
+	w.sizePlot.Series("call size",
+		noMoreThan(w.sizePlot.ValueCapacity(), c.callData),
+		linechart.SeriesCellOpts(cell.FgColor(cell.ColorGreen)),
+	)
+	w.sizePlot.Series("reply size",
+		noMoreThan(w.sizePlot.ValueCapacity(), c.replyData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorYellow)),
 	)
 }

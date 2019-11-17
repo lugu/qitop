@@ -39,9 +39,10 @@ var (
 
 // widgets holds the widgets used by this demo.
 type widgets struct {
-	sizePlot    *linechart.LineChart
-	latencyPlot *linechart.LineChart
 	topList     *text.Text
+	latencyPlot *linechart.LineChart
+	timePlot    *linechart.LineChart
+	sizePlot    *linechart.LineChart
 
 	index   int
 	lines   []string
@@ -131,7 +132,7 @@ func newTopList(ctx context.Context) (*text.Text, error) {
 
 func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
-		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" b")),
+		linechart.YAxisFormattedValues(linechart.ValueFormatterRound),
 		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
 		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
 		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
@@ -143,6 +144,18 @@ func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
 }
 
 func newLatencyPlot(ctx context.Context) (*linechart.LineChart, error) {
+	p, err := linechart.New(
+		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" µs")),
+		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
+		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+func newTimePlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
 		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" µs")),
 		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
@@ -170,10 +183,15 @@ func newWidgets(ctx context.Context, c *container.Container) (*widgets, error) {
 	if err != nil {
 		return nil, err
 	}
+	timePlot, err := newTimePlot(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &widgets{
 		topList:     topList,
 		sizePlot:    sizePlot,
 		latencyPlot: latencyPlot,
+		timePlot:    timePlot,
 	}, nil
 
 }
@@ -188,17 +206,24 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 			),
 		),
 		grid.ColWidthPerc(50,
-			grid.RowHeightPerc(50,
+			grid.RowHeightPerc(33,
 				grid.Widget(w.latencyPlot,
 					container.Border(linestyle.Light),
-					container.BorderTitle("Latency (microseconds)"),
+					container.BorderTitle("Latency (microseconds): reply (yellow), error (red)"),
 					container.BorderTitleAlignRight(),
 				),
 			),
-			grid.RowHeightPerc(50,
+			grid.RowHeightPerc(33,
+				grid.Widget(w.timePlot,
+					container.Border(linestyle.Light),
+					container.BorderTitle("CPU time: user (green), system (yellow)"),
+					container.BorderTitleAlignRight(),
+				),
+			),
+			grid.RowHeightPerc(33,
 				grid.Widget(w.sizePlot,
 					container.Border(linestyle.Light),
-					container.BorderTitle("Message size (byte)"),
+					container.BorderTitle("Messages: call size (green), response size (yellow)"),
 					container.BorderTitleAlignRight(),
 				),
 			),
