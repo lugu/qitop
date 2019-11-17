@@ -4,10 +4,116 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/lugu/qiloop/bus"
 	"github.com/lugu/qiloop/bus/services"
+	"github.com/mum4k/termdash/cell"
+	"github.com/mum4k/termdash/container"
+	"github.com/mum4k/termdash/keyboard"
+	"github.com/mum4k/termdash/terminal/terminalapi"
+	"github.com/mum4k/termdash/widgets/text"
 )
+
+// periodic executes the provided closure periodically every interval.
+// Exits when the context expires.
+func periodic(ctx context.Context, interval time.Duration, fn func()) {
+}
+
+type highlight struct {
+	index   int
+	lines   []string
+	counter []entry
+}
+
+func newHighlighter(ctx context.Context, cancel context.CancelFunc, w *widgets) (*highlight, error) {
+	updater, err := statUpdater(ctx, sess, cancel)
+	if err != nil {
+		return nil, err
+	}
+	h := &highlight{
+		index: 0,
+		lines: []string{},
+	}
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				lines, err := updater()
+				if err != nil {
+					mainErr = err
+					cancel()
+				}
+				h.lines = lines
+				h.updateTopList(w)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return h, nil
+}
+
+func (h *highlight) key(c *container.Container, w *widgets, k *terminalapi.Keyboard) error {
+	switch k.Key {
+	case 'k', keyboard.KeyArrowUp:
+		if h.index > 0 {
+			h.index--
+		}
+		h.updateTopList(w)
+	case 'j', keyboard.KeyArrowDown:
+		if h.index < len(h.lines)-1 {
+			h.index++
+		}
+		h.updateTopList(w)
+	case keyboard.KeyEnter:
+		if h.index == 0 {
+			setLayout(c, w, layoutTop)
+			if w.collector != nil {
+				w.collector.cancel()
+				w.collector = nil
+			}
+			if w.logger != nil {
+				w.logger.cancel()
+				w.logger = nil
+			}
+			return nil
+		}
+		setLayout(c, w, layoutTopTraceLogs)
+
+		line := h.lines[h.index]
+		labels := strings.SplitN(line, " | ", 5)
+		if len(labels) != 5 {
+			return fmt.Errorf("invalid line: %s", line)
+		}
+		desc := strings.SplitN(labels[4], ".", 2)
+		if len(desc) != 2 {
+			return fmt.Errorf("invalid service.action: %s", labels[4])
+		}
+		err := selectMethod(c, w, desc[0], desc[1])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *highlight) updateTopList(w *widgets) {
+	w.topList.Reset()
+	for i, line := range h.lines {
+		l := fmt.Sprintf("%s\n", line)
+		if i == h.index {
+			opt := text.WriteCellOpts(cell.FgColor(cell.ColorYellow))
+			w.topList.Write(l, opt)
+		} else {
+			w.topList.Write(l)
+		}
+	}
+}
 
 type entry struct {
 	count  bus.MethodStatistics

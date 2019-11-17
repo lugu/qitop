@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/lugu/qiloop/app"
@@ -64,45 +63,9 @@ type widgets struct {
 	timePlot    *linechart.LineChart
 	sizePlot    *linechart.LineChart
 
-	index   int
-	lines   []string
-	counter []entry
-
+	highlight *highlight
 	collector *collector
 	logger    *logger
-}
-
-func (w *widgets) refreshTopList(lines []string) {
-	w.lines = lines
-	w.updateTopList()
-}
-
-func (w *widgets) updateTopList() {
-	w.topList.Reset()
-	for i, line := range w.lines {
-		l := fmt.Sprintf("%s\n", line)
-		if i == w.index {
-			opt := text.WriteCellOpts(cell.FgColor(cell.ColorYellow))
-			w.topList.Write(l, opt)
-		} else {
-			w.topList.Write(l)
-		}
-	}
-}
-
-// periodic executes the provided closure periodically every interval.
-// Exits when the context expires.
-func periodic(ctx context.Context, interval time.Duration, fn func()) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			fn()
-		case <-ctx.Done():
-			return
-		}
-	}
 }
 
 func newLogScroll(ctx context.Context) (*text.Text, error) {
@@ -155,7 +118,7 @@ func newTimePlot(ctx context.Context) (*linechart.LineChart, error) {
 }
 
 // newWidgets creates all widgets used.
-func newWidgets(ctx context.Context, c *container.Container) (*widgets, error) {
+func newWidgets(ctx context.Context, cancel context.CancelFunc, c *container.Container) (*widgets, error) {
 
 	topList, err := newTopList(ctx)
 	if err != nil {
@@ -293,49 +256,6 @@ func setLayout(c *container.Container, w *widgets, lt layoutType) error {
 	return c.Update(rootID, gridOpts...)
 }
 
-func key(c *container.Container, w *widgets, k *terminalapi.Keyboard) error {
-	switch k.Key {
-	case 'k', keyboard.KeyArrowUp:
-		if w.index > 0 {
-			w.index--
-		}
-		w.updateTopList()
-	case 'j', keyboard.KeyArrowDown:
-		if w.index < len(w.lines)-1 {
-			w.index++
-		}
-		w.updateTopList()
-	case keyboard.KeyEnter:
-		if w.index == 0 {
-			setLayout(c, w, layoutTop)
-			if w.collector != nil {
-				w.collector.cancel()
-				w.collector = nil
-			}
-			if w.logger != nil {
-				w.logger.cancel()
-				w.logger = nil
-			}
-			return nil
-		}
-		setLayout(c, w, layoutTopTraceLogs)
-
-		line := w.lines[w.index]
-		labels := strings.SplitN(line, " | ", 5)
-		if len(labels) != 5 {
-			return fmt.Errorf("invalid line: %s", line)
-		}
-		desc := strings.SplitN(labels[4], ".", 2)
-		if len(desc) != 2 {
-			return fmt.Errorf("invalid service.action: %s", labels[4])
-		}
-		err := selectMethod(c, w, desc[0], desc[1])
-		if err != nil {
-		}
-	}
-	return nil
-}
-
 func selectMethod(c *container.Container, w *widgets, service, method string) error {
 
 	if w.collector != nil {
@@ -411,24 +331,15 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	w, err := newWidgets(ctx, c)
+	w, err := newWidgets(ctx, cancel, c)
 	if err != nil {
 		return err
 	}
 
-	updater, err := statUpdater(ctx, sess, cancel)
+	w.highlight, err = newHighlighter(ctx, cancel, w)
 	if err != nil {
 		return err
 	}
-
-	go periodic(ctx, 1*time.Second, func() {
-		lines, err := updater()
-		if err != nil {
-			mainErr = err
-			cancel()
-		}
-		w.refreshTopList(lines)
-	})
 
 	if service != "" && method != "" {
 		selectMethod(c, w, service, method)
@@ -444,7 +355,7 @@ func run() error {
 	}
 
 	quitter := func(k *terminalapi.Keyboard) {
-		err := key(c, w, k)
+		err := w.highlight.key(c, w, k)
 		if err != nil {
 			mainErr = err
 			cancel()
