@@ -32,8 +32,21 @@ const (
 	redrawInterval = 250 * time.Millisecond
 )
 
+// layoutType represents the possible UI layouts
+type layoutType int
+
+const (
+	// layoutTop: only shows method usage
+	layoutTop layoutType = iota
+	// layoutTop: shows top method usage and trace
+	layoutTopTrace
+	// layoutTop: shows method usage, trace and logs
+	layoutTopTraceLogs
+)
+
 var (
-	sess    bus.Session
+	sess bus.Session
+
 	mainErr error = nil
 )
 
@@ -49,44 +62,6 @@ type widgets struct {
 	counter []entry
 
 	collector *collector
-}
-
-func (w *widgets) key(k *terminalapi.Keyboard) error {
-	switch k.Key {
-	case 'k', keyboard.KeyArrowUp:
-		if w.index > 0 {
-			w.index--
-		}
-		w.updateTopList()
-	case 'j', keyboard.KeyArrowDown:
-		if w.index < len(w.lines)-1 {
-			w.index++
-		}
-		w.updateTopList()
-	case keyboard.KeyEnter:
-		if w.index == 0 {
-			return nil
-		}
-		line := w.lines[w.index]
-		labels := strings.SplitN(line, " | ", 5)
-		if len(labels) != 5 {
-			return fmt.Errorf("invalid line: %s", line)
-		}
-		desc := strings.SplitN(labels[4], ".", 2)
-		if len(desc) != 2 {
-			return fmt.Errorf("invalid service.action: %s", labels[4])
-		}
-		if w.collector != nil {
-			w.collector.cancel()
-			w.collector = nil
-		}
-		collector, err := newCollector(sess, w, desc[0], desc[1])
-		if err != nil {
-			return err
-		}
-		w.collector = collector
-	}
-	return nil
 }
 
 func (w *widgets) refreshTopList(lines []string) {
@@ -133,9 +108,7 @@ func newTopList(ctx context.Context) (*text.Text, error) {
 func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
 		linechart.YAxisFormattedValues(linechart.ValueFormatterRound),
-		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
-		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
-		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+		linechart.AxesCellOpts(cell.FgColor(cell.ColorBlue)),
 	)
 	if err != nil {
 		return nil, err
@@ -146,9 +119,7 @@ func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
 func newLatencyPlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
 		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" µs")),
-		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
-		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
-		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+		linechart.AxesCellOpts(cell.FgColor(cell.ColorBlue)),
 	)
 	if err != nil {
 		return nil, err
@@ -158,9 +129,7 @@ func newLatencyPlot(ctx context.Context) (*linechart.LineChart, error) {
 func newTimePlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
 		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" µs")),
-		linechart.AxesCellOpts(cell.FgColor(cell.ColorRed)),
-		linechart.YLabelCellOpts(cell.FgColor(cell.ColorGreen)),
-		linechart.XLabelCellOpts(cell.FgColor(cell.ColorGreen)),
+		linechart.AxesCellOpts(cell.FgColor(cell.ColorBlue)),
 	)
 	if err != nil {
 		return nil, err
@@ -196,39 +165,53 @@ func newWidgets(ctx context.Context, c *container.Container) (*widgets, error) {
 
 }
 
-func gridLayout(w *widgets) ([]container.Option, error) {
+func gridLayout(w *widgets, layout layoutType) ([]container.Option, error) {
 
-	elements := []grid.Element{
-		grid.ColWidthPerc(50,
+	var elements []grid.Element
+
+	switch layout {
+	case layoutTop:
+		elements = []grid.Element{
 			grid.Widget(w.topList,
 				container.Border(linestyle.Light),
 				container.BorderTitle("Most used methods"),
 			),
-		),
-		grid.ColWidthPerc(50,
-			grid.RowHeightPerc(33,
-				grid.Widget(w.latencyPlot,
+		}
+	case layoutTopTrace:
+		elements = []grid.Element{
+			grid.ColWidthPerc(50,
+				grid.Widget(w.topList,
 					container.Border(linestyle.Light),
-					container.BorderTitle("Latency (microseconds): reply (yellow), error (red)"),
-					container.BorderTitleAlignRight(),
+					container.BorderTitle("Most used methods"),
 				),
 			),
-			grid.RowHeightPerc(33,
-				grid.Widget(w.timePlot,
-					container.Border(linestyle.Light),
-					container.BorderTitle("CPU time: user (green), system (yellow)"),
-					container.BorderTitleAlignRight(),
+			grid.ColWidthPerc(50,
+				grid.RowHeightPerc(33,
+					grid.Widget(w.latencyPlot,
+						container.Border(linestyle.Light),
+						container.BorderTitle("Latency (microseconds): reply (yellow), error (red)"),
+						container.BorderTitleAlignRight(),
+					),
+				),
+				grid.RowHeightPerc(33,
+					grid.Widget(w.timePlot,
+						container.Border(linestyle.Light),
+						container.BorderTitle("CPU time: user (green), system (yellow)"),
+						container.BorderTitleAlignRight(),
+					),
+				),
+				grid.RowHeightPerc(33,
+					grid.Widget(w.sizePlot,
+						container.Border(linestyle.Light),
+						container.BorderTitle("Messages: call size (green), response size (yellow)"),
+						container.BorderTitleAlignRight(),
+					),
 				),
 			),
-			grid.RowHeightPerc(33,
-				grid.Widget(w.sizePlot,
-					container.Border(linestyle.Light),
-					container.BorderTitle("Messages: call size (green), response size (yellow)"),
-					container.BorderTitleAlignRight(),
-				),
-			),
-		),
+		}
+	case layoutTopTraceLogs:
 	}
+
 	builder := grid.New()
 	builder.Add(elements...)
 	gridOpts, err := builder.Build()
@@ -238,7 +221,68 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 	return gridOpts, nil
 }
 
+// setLayout sets the specified layout.
+func setLayout(c *container.Container, w *widgets, lt layoutType) error {
+	gridOpts, err := gridLayout(w, lt)
+	if err != nil {
+		return err
+	}
+	// remove border: else the previous container border is kept
+	c.Update(rootID, container.Border(linestyle.None))
+	return c.Update(rootID, gridOpts...)
+}
+
+func key(c *container.Container, w *widgets, k *terminalapi.Keyboard) error {
+	switch k.Key {
+	case 'k', keyboard.KeyArrowUp:
+		if w.index > 0 {
+			w.index--
+		}
+		w.updateTopList()
+	case 'j', keyboard.KeyArrowDown:
+		if w.index < len(w.lines)-1 {
+			w.index++
+		}
+		w.updateTopList()
+	case keyboard.KeyEnter:
+		if w.index == 0 {
+			setLayout(c, w, layoutTop)
+			if w.collector != nil {
+				w.collector.cancel()
+				w.collector = nil
+			}
+			return nil
+		}
+		setLayout(c, w, layoutTopTrace)
+
+		line := w.lines[w.index]
+		labels := strings.SplitN(line, " | ", 5)
+		if len(labels) != 5 {
+			return fmt.Errorf("invalid line: %s", line)
+		}
+		desc := strings.SplitN(labels[4], ".", 2)
+		if len(desc) != 2 {
+			return fmt.Errorf("invalid service.action: %s", labels[4])
+		}
+		if w.collector != nil {
+			w.collector.cancel()
+			w.collector = nil
+		}
+		collector, err := newCollector(sess, w, desc[0], desc[1])
+		if err != nil {
+			return err
+		}
+		w.collector = collector
+	}
+	return nil
+}
+
 func run() error {
+	var service string
+	var method string
+
+	flag.StringVar(&service, "service", "", "service name")
+	flag.StringVar(&method, "method", "", "method name")
 
 	flag.Parse()
 	var err error
@@ -253,6 +297,7 @@ func run() error {
 	}
 	defer t.Close()
 
+	log.SetFlags(0)
 	logger := log.Writer()
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(logger)
@@ -284,22 +329,28 @@ func run() error {
 		w.refreshTopList(lines)
 	})
 
-	gridOpts, err := gridLayout(w) // equivalent to contLayout(w)
+	if service != "" && method != "" {
+		collector, err := newCollector(sess, w, service, method)
+		if err != nil {
+			return err
+		}
+		w.collector = collector
+		setLayout(c, w, layoutTopTrace)
+	} else {
+		setLayout(c, w, layoutTop)
+	}
 	if err != nil {
 		return err
 	}
 
-	if err := c.Update(rootID, gridOpts...); err != nil {
-		return err
-	}
-
 	quitter := func(k *terminalapi.Keyboard) {
-		err := w.key(k)
+		err := key(c, w, k)
 		if err != nil {
 			mainErr = err
 			cancel()
 		}
-		if k.Key == keyboard.KeyEsc || k.Key == keyboard.KeyCtrlC {
+		switch k.Key {
+		case keyboard.KeyEsc, keyboard.KeyCtrlC:
 			cancel()
 		}
 	}
