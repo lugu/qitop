@@ -12,6 +12,7 @@ import (
 	"github.com/lugu/qiloop/app"
 	"github.com/lugu/qiloop/bus"
 	qilog "github.com/lugu/qiloop/bus/logger"
+	"github.com/lugu/qitop/selection"
 	"github.com/mum4k/termdash"
 	"github.com/mum4k/termdash/cell"
 	"github.com/mum4k/termdash/container"
@@ -55,7 +56,7 @@ var (
 
 // widgets holds the widgets used by this demo.
 type widgets struct {
-	topList     *text.Text
+	topList     *selection.SelectionList
 	logScroll   *text.Text
 	serviceInfo *text.Text
 	latencyPlot *linechart.LineChart
@@ -92,9 +93,8 @@ func newServiceInfo(ctx context.Context) (*text.Text, error) {
 	return t, nil
 }
 
-func newTopList(ctx context.Context) (*text.Text, error) {
-	// FIXME: implement method list roll content
-	t, err := text.New(text.RollContent())
+func newTopList(ctx context.Context) (*selection.SelectionList, error) {
+	t, err := selection.New()
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +338,7 @@ func run() error {
 		return err
 	}
 
-	w.highlight, err = newHighlighter(ctx, cancel, w)
+	w.highlight, err = newHighlighter(ctx, cancel, c, w)
 	if err != nil {
 		return err
 	}
@@ -357,11 +357,6 @@ func run() error {
 	}
 
 	quitter := func(k *terminalapi.Keyboard) {
-		err := w.highlight.key(c, w, k)
-		if err != nil {
-			mainErr = err
-			cancel()
-		}
 		switch k.Key {
 		case keyboard.KeyEsc, keyboard.KeyCtrlC:
 			cancel()
