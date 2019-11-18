@@ -8,6 +8,7 @@ List the most used methods and display agregated metrics.
 ## Navigation
 
     j/k or up/down : naviate the top list
+    enter: visuallize the selected method
     space/backspace : scroll the logs
     page up/page down : navigate the logs
 
