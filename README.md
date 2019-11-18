@@ -37,3 +37,8 @@ List the most used methods and display agregated metrics.
 ## Credentials
 
 One can create a file ~/.qiloop-auth.conf with the user and token.
+
+## Credits
+
+Based on [Termdash](http://github.com/mum4k/termdash/wiki) and
+[QiLoop](http://github.com/lugu/qiloop).
