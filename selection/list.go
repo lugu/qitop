@@ -3,13 +3,14 @@ package selection
 import (
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/mum4k/termdash/cell"
 	"github.com/mum4k/termdash/keyboard"
 	"github.com/mum4k/termdash/terminal/terminalapi"
 	"github.com/mum4k/termdash/widgetapi"
 	"github.com/mum4k/termdash/widgets/text"
+
+	tb "github.com/nsf/termbox-go"
 )
 
 // SelectionList displays a list of item which can be selected.
@@ -22,7 +23,7 @@ type SelectionList struct {
 	onSelect func(int, string) error
 	items    []string
 	current  int
-	mu       sync.Mutex
+	first    int
 }
 
 func New() (*SelectionList, error) {
@@ -35,15 +36,15 @@ func New() (*SelectionList, error) {
 		func(int, string) error { return errors.New("not configured") },
 		[]string{},
 		0,
-		sync.Mutex{},
+		0,
 	}, nil
 }
 
 func (s *SelectionList) updateUI() {
 	s.Reset()
-	for i, item := range s.items {
+	for i, item := range s.items[s.first:] {
 		l := fmt.Sprintf("%s\n", item)
-		if i == s.current {
+		if i+s.first == s.current {
 			opt := text.WriteCellOpts(cell.FgColor(cell.ColorYellow))
 			s.Write(l, opt)
 		} else {
@@ -63,11 +64,19 @@ func (s *SelectionList) Keyboard(k *terminalapi.Keyboard) error {
 	case 'k', keyboard.KeyArrowUp:
 		if s.current > 0 {
 			s.current--
+			if s.first > 0 && s.current < s.first+2 {
+				s.first--
+			}
 		}
 		s.updateUI()
 	case 'j', keyboard.KeyArrowDown:
 		if s.current < len(s.items)-1 {
 			s.current++
+			_, heigh := tb.Size()
+			heigh = heigh/2 - 6
+			if s.first+heigh < s.current {
+				s.first++
+			}
 		}
 		s.updateUI()
 	case keyboard.KeyEnter:
