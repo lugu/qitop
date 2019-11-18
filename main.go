@@ -252,6 +252,8 @@ func gridLayout(w *widgets, layout layoutType) ([]container.Option, error) {
 						container.Border(linestyle.Light),
 						container.BorderTitle("CPU time: user (green), system (yellow)"),
 						container.BorderTitleAlignRight(),
+						// BUG: fix xterm with:
+						container.BorderColor(cell.ColorDefault),
 					),
 				),
 				grid.RowHeightPerc(33,
