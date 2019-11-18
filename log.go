@@ -22,9 +22,9 @@ func label(l qilog.LogLevel) (cell.Color, string) {
 	case qilog.LogLevelInfo:
 		return cell.ColorMagenta, "[I]"
 	case qilog.LogLevelVerbose:
-		return cell.ColorWhite, "[V]"
+		return cell.ColorDefault, "[V]"
 	case qilog.LogLevelDebug:
-		return cell.ColorRGB6(4, 4, 4), "[D]"
+		return cell.ColorRGB6(3, 3, 3), "[D]"
 	default:
 		return cell.ColorRed, "[?]"
 	}

@@ -1,26 +1,39 @@
-# qitop
+# QiTop
 
-List the most used methods.
+List the most used methods and display agregated metrics.
+
+![Screenshot](qitop.png)
+
+
+## Navigation
+
+    j/k or up/down : naviate the top list
+    space/backspace : scroll the logs
+    page up/page down : navigate the logs
 
 ## Installation
 
-```
-export CGO_ENABLED=0
-go get github.com/lugu/qitop
-```
+    env CGO_ENABLED=0 go get github.com/lugu/qitop
+
 ## Usage
 
-Local:
+    $ qitop -h
+    Usage of qitop:
+      -log-file string
+            file where to write qitop logs
+      -log-level int
+            log level, 1:fatal, 2:error, 3:warning, 4:info, 5:verbose, 6:debug (default 5)
+      -method string
+            method name
+      -qi-url string
+            Service directory URL (default "tcp://localhost:9559")
+      -service string
+            service name
+      -token string
+            user token
+      -user string
+            user name
 
-```
-scp qitop nao@<robotip>:~
-ssh nao@<robotip>
-./qitop
-```
+## Credentials
 
-Remote:
-
-```
-printf "nao\nnao\n" > ~/.qi-auth.conf
-./qitop -qi-url tcps://10.0.164.195:9443
-```
+One can create a file ~/.qiloop-auth.conf with the user and token.
