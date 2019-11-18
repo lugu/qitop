@@ -39,8 +39,6 @@ type layoutType int
 const (
 	// layoutTop: only shows method usage
 	layoutTop layoutType = iota
-	// layoutTop: shows top method usage and trace
-	layoutTopTrace
 	// layoutTop: shows method usage, trace and logs
 	layoutTopTraceLogs
 )
@@ -184,38 +182,6 @@ func gridLayout(w *widgets, layout layoutType) ([]container.Option, error) {
 			grid.Widget(w.topList,
 				container.Border(linestyle.Light),
 				container.BorderTitle("Most used methods"),
-			),
-		}
-	case layoutTopTrace:
-		elements = []grid.Element{
-			grid.ColWidthPerc(50,
-				grid.Widget(w.topList,
-					container.Border(linestyle.Light),
-					container.BorderTitle("Most used methods"),
-				),
-			),
-			grid.ColWidthPerc(50,
-				grid.RowHeightPerc(33,
-					grid.Widget(w.latencyPlot,
-						container.Border(linestyle.Light),
-						container.BorderTitle("Latency (microseconds): reply (yellow), error (red)"),
-						container.BorderTitleAlignRight(),
-					),
-				),
-				grid.RowHeightPerc(33,
-					grid.Widget(w.timePlot,
-						container.Border(linestyle.Light),
-						container.BorderTitle("CPU time: user (green), system (yellow)"),
-						container.BorderTitleAlignRight(),
-					),
-				),
-				grid.RowHeightPerc(33,
-					grid.Widget(w.sizePlot,
-						container.Border(linestyle.Light),
-						container.BorderTitle("Messages: call size (green), response size (yellow)"),
-						container.BorderTitleAlignRight(),
-					),
-				),
 			),
 		}
 	case layoutTopTraceLogs:
