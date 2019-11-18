@@ -8,6 +8,7 @@ import (
 	"github.com/mum4k/termdash/cell"
 	"github.com/mum4k/termdash/keyboard"
 	"github.com/mum4k/termdash/terminal/terminalapi"
+	"github.com/mum4k/termdash/widgetapi"
 	"github.com/mum4k/termdash/widgets/text"
 )
 
@@ -74,4 +75,10 @@ func (s *SelectionList) Keyboard(k *terminalapi.Keyboard) error {
 		return s.onSelect(index, item)
 	}
 	return nil
+}
+
+func (s *SelectionList) Options() widgetapi.Options {
+	opt := s.Text.Options()
+	opt.WantKeyboard = widgetapi.KeyScopeGlobal
+	return opt
 }
