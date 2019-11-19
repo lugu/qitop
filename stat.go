@@ -131,6 +131,14 @@ func (h *highlight) updateService(serviceName string, info sd.ServiceInfo) error
 	if err != nil {
 		return err
 	}
+	err = obj.ClearStats()
+	if err != nil {
+		return err
+	}
+	err = obj.EnableStats(true)
+	if err != nil {
+		return err
+	}
 
 	meta, err := obj.MetaObject(obj.ObjectID())
 	if err != nil {
@@ -213,12 +221,6 @@ func (h *highlight) initServices(ctx context.Context, sess bus.Session, cancel c
 		}
 	}()
 
-	// enable stats
-	for _, obj := range h.services {
-		obj.EnableStats(true)
-		obj.ClearStats()
-
-	}
 	go func(ctx context.Context) {
 		<-ctx.Done()
 
