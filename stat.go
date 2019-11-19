@@ -3,14 +3,48 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lugu/qiloop/bus"
-	"github.com/lugu/qiloop/bus/services"
+	sd "github.com/lugu/qiloop/bus/services"
 	"github.com/mum4k/termdash/container"
 )
+
+type entry struct {
+	count  bus.MethodStatistics
+	action string
+}
+
+type gallery []entry
+
+func (e gallery) Len() int      { return len(e) }
+func (e gallery) Swap(i, j int) { e[i], e[j] = e[j], e[i] }
+func (e gallery) Less(i, j int) bool {
+	if e[i].count.Count == e[j].count.Count {
+		return e[i].count.Wall.CumulatedValue >
+			e[j].count.Wall.CumulatedValue
+	}
+	return e[i].count.Count > e[j].count.Count
+}
+
+func getObject(sess bus.Session, info sd.ServiceInfo) (bus.ObjectProxy, error) {
+	proxy, err := sess.Proxy(info.Name, 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect service (%s): %s", info.Name, err)
+	}
+	return bus.MakeObject(proxy), nil
+}
+
+func ignoreAction(id uint32) bool {
+	if id < 0x50 || id > 0x53 {
+		return false
+	}
+	return true
+}
 
 // periodic executes the provided closure periodically every interval.
 // Exits when the context expires.
@@ -18,14 +52,27 @@ func periodic(ctx context.Context, interval time.Duration, fn func()) {
 }
 
 type highlight struct {
+	services      map[string]bus.ObjectProxy
+	actions       map[string]string
+	servicesMutex sync.Mutex
 }
 
 func newHighlighter(ctx context.Context, cancel context.CancelFunc, c *container.Container, w *widgets) (*highlight, error) {
-	updater, err := statUpdater(ctx, sess, cancel)
+
+	h := &highlight{
+		services: map[string]bus.ObjectProxy{},
+		actions:  map[string]string{},
+	}
+
+	err := h.initServices(ctx, sess, cancel)
 	if err != nil {
 		return nil, err
 	}
-	h := &highlight{}
+
+	updater, err := h.updater(ctx, sess, cancel)
+	if err != nil {
+		return nil, err
+	}
 
 	onSelect := func(index int, line string) error {
 		if index == 0 {
@@ -79,85 +126,95 @@ func newHighlighter(ctx context.Context, cancel context.CancelFunc, c *container
 	return h, nil
 }
 
-type entry struct {
-	count  bus.MethodStatistics
-	action string
-}
-
-type gallery []entry
-
-func (e gallery) Len() int      { return len(e) }
-func (e gallery) Swap(i, j int) { e[i], e[j] = e[j], e[i] }
-func (e gallery) Less(i, j int) bool {
-	if e[i].count.Count == e[j].count.Count {
-		return e[i].count.Wall.CumulatedValue >
-			e[j].count.Wall.CumulatedValue
-	}
-	return e[i].count.Count > e[j].count.Count
-}
-
-func getObject(sess bus.Session, info services.ServiceInfo) (bus.ObjectProxy, error) {
-	proxy, err := sess.Proxy(info.Name, 1)
+func (h *highlight) updateService(serviceName string, info sd.ServiceInfo) error {
+	obj, err := getObject(sess, info)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect service (%s): %s", info.Name, err)
+		return err
 	}
-	return bus.MakeObject(proxy), nil
-}
 
-func ignoreAction(id uint32) bool {
-	if id < 0x50 || id > 0x53 {
-		return false
+	meta, err := obj.MetaObject(obj.ObjectID())
+	if err != nil {
+		return err
 	}
-	return true
+	h.servicesMutex.Lock()
+	defer h.servicesMutex.Unlock()
+	h.services[serviceName] = obj
+	for id, method := range meta.Methods {
+		if ignoreAction(id) {
+			continue
+		}
+		actionID := fmt.Sprintf("%s.%d", serviceName, id)
+		actionName := fmt.Sprintf("%s.%s", serviceName, method.Name)
+		h.actions[actionID] = actionName
+	}
+	return nil
 }
 
 // returns a function which update the top statistics
-func statUpdater(ctx context.Context, sess bus.Session, cancel context.CancelFunc) (func() ([]string, error), error) {
-	proxies := services.Services(sess)
+func (h *highlight) initServices(ctx context.Context, sess bus.Session, cancel context.CancelFunc) error {
+	proxies := sd.Services(sess)
 
 	onDisconnect := func(err error) {
 		mainErr = fmt.Errorf("Service directory disconnection: %s", err)
 		cancel()
 	}
+
 	directory, err := proxies.ServiceDirectory(onDisconnect)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	serviceList, err := directory.Services()
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	services := map[string]bus.ObjectProxy{}
-	counter := map[string]bus.MethodStatistics{}
-	actions := map[string]string{}
 
 	for _, info := range serviceList {
-		services[info.Name], err = getObject(sess, info)
+		err = h.updateService(info.Name, info)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	for servicename, obj := range services {
-		meta, err := obj.MetaObject(obj.ObjectID())
-		if err != nil {
-			return nil, err
-		}
-		for id, method := range meta.Methods {
-			if ignoreAction(id) {
-				continue
-			}
-			actionID := fmt.Sprintf("%s.%d", servicename, id)
-			actionName := fmt.Sprintf("%s.%s", servicename, method.Name)
-			actions[actionID] = actionName
-			counter[actionName] = bus.MethodStatistics{}
-		}
+	cancelAdded, added, err := directory.SubscribeServiceAdded()
+	if err != nil {
+		return err
 	}
+	cancelRemoved, removed, err := directory.SubscribeServiceRemoved()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				cancelAdded()
+				cancelRemoved()
+				return
+			case srv := <-added:
+				info, err := directory.Service(srv.Name)
+				if err != nil {
+					log.Print(err)
+					continue
+				}
+				err = h.updateService(srv.Name, info)
+				if err != nil {
+					log.Print(err)
+					continue
+				}
+			case srv := <-removed:
+				h.servicesMutex.Lock()
+				if _, ok := h.services[srv.Name]; ok {
+					delete(h.services, srv.Name)
+				}
+				h.servicesMutex.Unlock()
+			}
+		}
+	}()
 
 	// enable stats
-	for _, obj := range services {
+	for _, obj := range h.services {
 		obj.EnableStats(true)
 		obj.ClearStats()
 
@@ -165,13 +222,20 @@ func statUpdater(ctx context.Context, sess bus.Session, cancel context.CancelFun
 	go func(ctx context.Context) {
 		<-ctx.Done()
 
-		for _, obj := range services {
+		for _, obj := range h.services {
 			obj.EnableStats(false)
 		}
 	}(ctx)
+	return nil
+}
+
+func (h *highlight) updater(ctx context.Context, sess bus.Session, cancel context.CancelFunc) (func() ([]string, error), error) {
+
 	return func() ([]string, error) {
 		for {
-			for name, obj := range services {
+			counter := map[string]bus.MethodStatistics{}
+			h.servicesMutex.Lock()
+			for name, obj := range h.services {
 				stats, err := obj.Stats()
 				if err != nil {
 					continue
@@ -181,10 +245,14 @@ func statUpdater(ctx context.Context, sess bus.Session, cancel context.CancelFun
 						continue
 					}
 					entry := fmt.Sprintf("%s.%d", name, action)
-					action := actions[entry]
+					action, ok := h.actions[entry]
+					if !ok {
+						continue
+					}
 					counter[action] = stat
 				}
 			}
+			h.servicesMutex.Unlock()
 			topC := make([]entry, 0)
 			for action, count := range counter {
 				if count.Count == 0 {
