@@ -352,7 +352,7 @@ func run() (err error) {
 
 	quitter := func(k *terminalapi.Keyboard) {
 		switch k.Key {
-		case keyboard.KeyEsc, keyboard.KeyCtrlC:
+		case keyboard.KeyEsc, keyboard.KeyCtrlC, 'q':
 			cancel()
 		}
 	}

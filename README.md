@@ -1,20 +1,21 @@
 # QiTop
 
-List the most used methods and display agregated metrics.
+List the most used methods and display aggregated metrics.
 
 ![Screenshot](qitop.png)
 
 
 ## Navigation
 
+    esc/q: quit
     j/k or up/down : naviate the top list
-    enter: visuallize the selected method
+    enter: visualize the selected method
     space/backspace : scroll the logs
     page up/page down : navigate the logs
 
-## Installation
+## Compilation for the robot
 
-    env CGO_ENABLED=0 go get github.com/lugu/qitop
+    env CGO_ENABLED=0 go build github.com/lugu/qitop
 
 ## Usage
 
@@ -23,15 +24,13 @@ List the most used methods and display agregated metrics.
       -log-file string
             file where to write qitop logs
       -log-level int
-            log level, 1:fatal, 2:error, 3:warning, 4:info, 5:verbose, 6:debug (default 5)
+            log level, 1:fatal, 2:error, 3:warning, 4:info, 5:verbose, 6:debug (default 4)
       -method string
             method name
       -qi-url string
             Service directory URL (default "tcp://localhost:9559")
       -service string
             service name
-      -token string
-            user token
       -user string
             user name
 
@@ -41,5 +40,5 @@ One can create a file ~/.qiloop-auth.conf with the user and token.
 
 ## Credits
 
-Based on [Termdash](http://github.com/mum4k/termdash/wiki) and
+Build thanks to [Termdash](http://github.com/mum4k/termdash/wiki) and
 [QiLoop](http://github.com/lugu/qiloop).
