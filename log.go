@@ -34,8 +34,7 @@ type logger struct {
 }
 
 func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, error) {
-
-	srv := qilog.Services(sess)
+	w.logScroll.Reset()
 
 	directory, err := services.Services(sess).ServiceDirectory(nil)
 	if err != nil {
@@ -47,6 +46,7 @@ func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, e
 	}
 	location := fmt.Sprintf("%s:%d", info.MachineId, info.ProcessId)
 
+	srv := qilog.Services(sess)
 	logManager, err := srv.LogManager(nil)
 	if err != nil {
 		return nil, fmt.Errorf("access LogManager service: %s", err)
@@ -65,7 +65,7 @@ func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, e
 		return nil, fmt.Errorf("subscribe logs: %s", err)
 	}
 
-	err = logListener.SetLevel(qilog.LogLevelVerbose)
+	err = logListener.SetLevel(logLevel)
 	if err != nil {
 		return nil, fmt.Errorf("set verbosity: %s", err)
 	}

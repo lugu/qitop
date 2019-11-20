@@ -54,6 +54,14 @@ var (
 	mainErr error = nil
 )
 
+var (
+	service = flag.String("service", "", "service name")
+	method  = flag.String("method", "", "method name")
+	logFile = flag.String("log-file", "", "file where to write qitop logs")
+	level   = flag.Int("log-level", 4,
+		"log level, 1:fatal, 2:error, 3:warning, 4:info, 5:verbose, 6:debug")
+)
+
 // widgets holds the widgets used by this demo.
 type widgets struct {
 	topList     *selection.SelectionList
@@ -160,7 +168,6 @@ func newWidgets(ctx context.Context, cancel context.CancelFunc, c *container.Con
 	if err != nil {
 		return nil, err
 	}
-	serviceInfo.Write("hello\nworld")
 	return &widgets{
 		topList:     topList,
 		logScroll:   logScroll,
@@ -282,26 +289,13 @@ func selectMethod(c *container.Container, w *widgets, service, method string) er
 	return nil
 }
 
-func run() error {
-	var service string
-	var method string
-	var logFile string
+func run() (err error) {
 
-	var level int
-	logLevelInfo := "log level, 1:fatal, 2:error, 3:warning, 4:info, 5:verbose, 6:debug"
-
-	flag.StringVar(&service, "service", "", "service name")
-	flag.StringVar(&method, "method", "", "method name")
-	flag.IntVar(&level, "log-level", 5, logLevelInfo)
-	flag.StringVar(&logFile, "log-file", "", "file where to write qitop logs")
-
-	if level < 0 || level > 6 {
+	if *level < 0 || *level > 6 {
 		return fmt.Errorf("invalid log level")
 	}
-	logLevel = qilog.LogLevel{Level: int32(level)}
+	logLevel = qilog.LogLevel{Level: int32(*level)}
 
-	flag.Parse()
-	var err error
 	sess, err = app.SessionFromFlag()
 	if err != nil {
 		return err
@@ -315,9 +309,9 @@ func run() error {
 
 	log.SetFlags(0)
 	logger := ioutil.Discard
-	if logFile != "" {
+	if *logFile != "" {
 		var flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-		logger, err = os.OpenFile(logFile, flag, 0600)
+		logger, err = os.OpenFile(*logFile, flag, 0600)
 		if err != nil {
 			return err
 		}
@@ -343,8 +337,8 @@ func run() error {
 		return err
 	}
 
-	if service != "" && method != "" {
-		selectMethod(c, w, service, method)
+	if *service != "" && *method != "" {
+		selectMethod(c, w, *service, *method)
 		if err != nil {
 			return err
 		}
@@ -372,6 +366,7 @@ func run() error {
 }
 
 func main() {
+	flag.Parse()
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
