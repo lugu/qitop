@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/lugu/qiloop/bus"
 	qilog "github.com/lugu/qiloop/bus/logger"
@@ -61,7 +60,7 @@ func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, e
 	if err != nil {
 		return nil, fmt.Errorf("clear filters: %s", err)
 	}
-	cancel, logs, err := logListener.SubscribeOnLogMessage()
+	cancel, logs, err := logListener.SubscribeOnLogMessages()
 	if err != nil {
 		return nil, fmt.Errorf("subscribe logs: %s", err)
 	}
@@ -74,22 +73,23 @@ func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, e
 	go func() {
 		defer logListener.Terminate(logListener.ObjectID())
 		for {
-			m, ok := <-logs
-			if !ok {
-				w.logScroll.Reset()
-				return
+			msgs, ok := <-logs
+			for _, m := range msgs {
+				if !ok {
+					w.logScroll.Reset()
+					return
+				}
+				if m.Level == qilog.LogLevelNone {
+					continue
+				}
+				if m.Location != location {
+					continue
+				}
+				color, info := label(m.Level)
+				message := fmt.Sprintf("%s %s\n", info, m.Message)
+				opt := text.WriteCellOpts(cell.FgColor(color))
+				w.logScroll.Write(message, opt)
 			}
-			if m.Level == qilog.LogLevelNone {
-				continue
-			}
-			if m.Location != location {
-				continue
-			}
-			color, info := label(m.Level)
-			message := fmt.Sprintf("%s %s\n", info, m.Message)
-			log.Printf("%#v\n", m)
-			opt := text.WriteCellOpts(cell.FgColor(color))
-			w.logScroll.Write(message, opt)
 		}
 	}()
 	return &logger{
