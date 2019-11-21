@@ -34,6 +34,10 @@ github.com/lucas-clemente/quic-go v0.13.1 h1:CxtJTXQIh2aboCPk0M6vf530XOov6DZjVBi
 github.com/lucas-clemente/quic-go v0.13.1/go.mod h1:Vn3/Fb0/77b02SGhQk36KzOUmXgVpFfizUfW5WMaqyU=
 github.com/lugu/qiloop v0.0.0-20191117222453-a71b0dbbbeab h1:Njj0evFXypzMzNp+ajU/qEI24DO4t37CoOFYNLXP9nU=
 github.com/lugu/qiloop v0.0.0-20191117222453-a71b0dbbbeab/go.mod h1:Wyu9qTDAtgaCPjq0++b54Uk3hzDMuIK7/QNSjseDIxU=
+github.com/lugu/qiloop v0.0.0-20191119230647-1da2eb70f37a h1:NJ8GB0KHUjmMEqmsagUecWLgrs4MCMF9WbGqY94VBbg=
+github.com/lugu/qiloop v0.0.0-20191119230647-1da2eb70f37a/go.mod h1:Wyu9qTDAtgaCPjq0++b54Uk3hzDMuIK7/QNSjseDIxU=
+github.com/lugu/qiloop v0.0.0-20191121014346-1dcf73844760 h1:PMoZtFpNsFloxEfwJiG3IX5Mr8rcidx8PXZzvcp/cig=
+github.com/lugu/qiloop v0.0.0-20191121014346-1dcf73844760/go.mod h1:sHZkdBZKHijIW/6LL/7ELlKavEBoFGoq6r4Eb2FDuGA=
 github.com/marten-seemann/chacha20 v0.2.0 h1:f40vqzzx+3GdOmzQoItkLX5WLvHgPgyYqFFIO5Gh4hQ=
 github.com/marten-seemann/chacha20 v0.2.0/go.mod h1:HSdjFau7GzYRj+ahFNwsO3ouVJr1HFkWoEwNDb4TMtE=
 github.com/marten-seemann/qpack v0.1.0/go.mod h1:LFt1NU/Ptjip0C2CPkhimBz5CGE3WGDAUWqna+CNTrI=
@@ -62,6 +66,8 @@ golang.org/x/crypto v0.0.0-20191108234033-bd318be0434a h1:R/qVym5WAxsZWQqZCwDY/8
 golang.org/x/crypto v0.0.0-20191108234033-bd318be0434a/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/crypto v0.0.0-20191117063200-497ca9f6d64f h1:kz4KIr+xcPUsI3VMoqWfPMvtnJ6MGfiVwsWSVzphMO4=
 golang.org/x/crypto v0.0.0-20191117063200-497ca9f6d64f/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
+golang.org/x/crypto v0.0.0-20191119213627-4f8c1d86b1ba h1:9bFeDpN3gTqNanMVqNcoR/pJQuP5uroC3t1D7eXozTE=
+golang.org/x/crypto v0.0.0-20191119213627-4f8c1d86b1ba/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/net v0.0.0-20180906233101-161cd47e91fd/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/net v0.0.0-20190228165749-92fc7df08ae7/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/net v0.0.0-20190311183353-d8887717615a/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
@@ -78,6 +84,8 @@ golang.org/x/sys v0.0.0-20191110163157-d32e6e3b99c4 h1:Hynbrlo6LbYI3H1IqXpkVDOcX
 golang.org/x/sys v0.0.0-20191110163157-d32e6e3b99c4/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20191117211529-81af7394a238 h1:Bm3cDUUSrXTkUZ5SygdSTSdbkL29gk0MB0IOqdvfPuA=
 golang.org/x/sys v0.0.0-20191117211529-81af7394a238/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20191120155948-bd437916bb0e h1:N7DeIrjYszNmSW409R3frPPwglRwMkXSBzwVbkOjLLA=
+golang.org/x/sys v0.0.0-20191120155948-bd437916bb0e/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.2 h1:tW2bmiBqwgJj/UpqtC8EpXEZVYOwU0yG4iWbprSVAcs=
 golang.org/x/text v0.3.2/go.mod h1:bEr9sfX3Q8Zfm5fL9x+3itogRgK3+ptLWKqgva+5dAk=
