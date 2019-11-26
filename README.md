@@ -5,6 +5,14 @@ List the most used methods and display aggregated metrics.
 ![Screenshot](qitop.png)
 
 
+## About
+
+QiLoop is a observation tool designed to provide insights. It uses
+method statistics APIs for the top list and event tracing APIs for the
+line charts.
+
+For events recording, consider `qicli trace` or `qiloop trace`.
+
 ## Navigation
 
     esc/q: quit
