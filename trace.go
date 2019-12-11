@@ -7,6 +7,7 @@ import (
 
 	"github.com/lugu/qiloop/bus"
 	"github.com/lugu/qiloop/bus/net"
+	"github.com/lugu/qiloop/type/object"
 	"github.com/lugu/qiloop/type/value"
 	"github.com/mum4k/termdash/cell"
 	"github.com/mum4k/termdash/widgets/linechart"
@@ -60,6 +61,15 @@ type collector struct {
 	pending map[uint32]bus.EventTrace
 }
 
+func methodID(meta object.MetaObject, method string) (uint32, error) {
+	for id, m := range meta.Methods {
+		if m.Name == method {
+			return id, nil
+		}
+	}
+	return 0, fmt.Errorf("method not found: %s", method)
+}
+
 func newCollector(sess bus.Session, w *widgets, service, method string) (*collector, error) {
 	objectID := uint32(1)
 	proxy, err := sess.Proxy(service, objectID)
@@ -73,7 +83,7 @@ func newCollector(sess bus.Session, w *widgets, service, method string) (*collec
 		return nil, fmt.Errorf("%s: MetaObject: %s.", service, err)
 	}
 
-	slot, err := meta.MethodID(method)
+	slot, err := methodID(meta, method)
 	if err != nil {
 		return nil, fmt.Errorf("method not found: %s.", method)
 	}

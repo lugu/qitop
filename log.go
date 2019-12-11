@@ -36,7 +36,7 @@ type logger struct {
 func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, error) {
 	w.logScroll.Reset()
 
-	directory, err := services.Services(sess).ServiceDirectory(nil)
+	directory, err := services.ServiceDirectory(sess)
 	if err != nil {
 		return nil, err
 	}
@@ -46,8 +46,7 @@ func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, e
 	}
 	location := fmt.Sprintf("%s:%d", info.MachineId, info.ProcessId)
 
-	srv := qilog.Services(sess)
-	logManager, err := srv.LogManager(nil)
+	logManager, err := qilog.LogManager(sess)
 	if err != nil {
 		return nil, fmt.Errorf("access LogManager service: %s", err)
 	}
@@ -71,7 +70,7 @@ func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, e
 	}
 
 	go func() {
-		defer logListener.Terminate(logListener.ObjectID())
+		defer logListener.Terminate(logListener.Proxy().ObjectID())
 		for {
 			msgs, ok := <-logs
 			for _, m := range msgs {

@@ -140,7 +140,7 @@ func (h *highlight) updateService(serviceName string, info sd.ServiceInfo) error
 		return err
 	}
 
-	meta, err := obj.MetaObject(obj.ObjectID())
+	meta, err := obj.MetaObject(obj.Proxy().ObjectID())
 	if err != nil {
 		return err
 	}
@@ -160,17 +160,15 @@ func (h *highlight) updateService(serviceName string, info sd.ServiceInfo) error
 
 // returns a function which update the top statistics
 func (h *highlight) initServices(ctx context.Context, sess bus.Session, cancel context.CancelFunc) error {
-	proxies := sd.Services(sess)
 
-	onDisconnect := func(err error) {
-		mainErr = fmt.Errorf("Service directory disconnection: %s", err)
-		cancel()
-	}
-
-	directory, err := proxies.ServiceDirectory(onDisconnect)
+	directory, err := sd.ServiceDirectory(sess)
 	if err != nil {
 		return err
 	}
+	directory.Proxy().OnDisconnect(func(err error) {
+		mainErr = fmt.Errorf("Service directory disconnection: %s", err)
+		cancel()
+	})
 
 	serviceList, err := directory.Services()
 	if err != nil {
