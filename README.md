@@ -23,9 +23,20 @@ For events recording, consider `qicli trace` or `qiloop trace`.
 
 ## Compilation for the robot
 
-    env CGO_ENABLED=0 go build github.com/lugu/qitop
+    $ env GO111MODULE=on CGO_ENABLED=0 go get github.com/lugu/qitop
+    $ scp ~/go/bin/qitop nao@robot:~
 
 ## Usage
+
+From the robot:
+
+    $ qitop
+
+Or from a remote computer:
+
+    $ qitop -qi-url tcps://robot:9503 -user nao
+
+Help:
 
     $ qitop -h
     Usage of qitop:
