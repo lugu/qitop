@@ -57,7 +57,6 @@ type collector struct {
 
 	cancel func()
 
-	records []callEvent
 	pending map[uint32]bus.EventTrace
 }
 
@@ -106,7 +105,6 @@ func newCollector(sess bus.Session, w *widgets, service, method string) (*collec
 		cancel: cancel,
 
 		pending: map[uint32]bus.EventTrace{},
-		records: []callEvent{},
 
 		callData:         []float64{},
 		replyData:        []float64{},
@@ -133,7 +131,6 @@ func newCollector(sess bus.Session, w *widgets, service, method string) (*collec
 }
 
 func (c *collector) updateData(evt callEvent) {
-	c.records = append(c.records, evt)
 
 	if evt.responseType == net.Reply {
 		c.latencyData = append(c.latencyData, float64(evt.duration.Microseconds()))
@@ -167,40 +164,47 @@ func (c *collector) refreshData(e bus.EventTrace) {
 	c.updateData(newCallEvent(call, response))
 }
 
-func noMoreThan(max int, data []float64) []float64 {
+func noMoreThan(max int, data *[]float64) []float64 {
 	start := 0
 	if max == 0 {
 		return []float64{}
 	}
-	if max > 0 && max < len(data) {
-		start = len(data) - max
+	if max > 0 && len(*data) > 2*max {
+		// cleaning up
+		*data = (*data)[len(*data)-max:]
+		if len(*data) > max {
+			panic("boom")
+		}
 	}
-	return data[start:]
+	if max > 0 && max < len(*data) {
+		start = len(*data) - max
+	}
+	return (*data)[start:]
 }
 
 func (c *collector) updateUI(w *widgets) {
 	w.latencyPlot.Series("response time",
-		noMoreThan(w.latencyPlot.ValueCapacity(), c.latencyData),
+		noMoreThan(w.latencyPlot.ValueCapacity(), &c.latencyData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorYellow)),
 	)
 	w.latencyPlot.Series("error response time",
-		noMoreThan(w.latencyPlot.ValueCapacity(), c.latencyErrorData),
+		noMoreThan(w.latencyPlot.ValueCapacity(), &c.latencyErrorData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorRed)),
 	)
 	w.timePlot.Series("user time",
-		noMoreThan(w.timePlot.ValueCapacity(), c.usrTimeData),
+		noMoreThan(w.timePlot.ValueCapacity(), &c.usrTimeData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorGreen)),
 	)
 	w.timePlot.Series("system time",
-		noMoreThan(w.timePlot.ValueCapacity(), c.sysTimeData),
+		noMoreThan(w.timePlot.ValueCapacity(), &c.sysTimeData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorYellow)),
 	)
 	w.sizePlot.Series("call size",
-		noMoreThan(w.sizePlot.ValueCapacity(), c.callData),
+		noMoreThan(w.sizePlot.ValueCapacity(), &c.callData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorGreen)),
 	)
 	w.sizePlot.Series("reply size",
-		noMoreThan(w.sizePlot.ValueCapacity(), c.replyData),
+		noMoreThan(w.sizePlot.ValueCapacity(), &c.replyData),
 		linechart.SeriesCellOpts(cell.FgColor(cell.ColorYellow)),
 	)
 }
