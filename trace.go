@@ -25,10 +25,6 @@ type callEvent struct {
 
 func newCallEvent(call, response bus.EventTrace) callEvent {
 
-	if uint8(call.Kind) != net.Call {
-		panic(call)
-	}
-
 	since := time.Unix(call.Timestamp.Tv_sec, call.Timestamp.Tv_usec*1000)
 	until := time.Unix(response.Timestamp.Tv_sec, response.Timestamp.Tv_usec*1000)
 
@@ -155,23 +151,26 @@ func (c *collector) updateData(evt callEvent) {
 	c.replyData = append(c.replyData, float64(evt.replySize))
 }
 
-func (c *collector) refreshData(e bus.EventTrace) {
-	if e.SlotId != c.slot {
+func (c *collector) refreshData(e1 bus.EventTrace) {
+	if e1.SlotId != c.slot {
 		return
 	}
+	id := e1.Id
 
-	e0, ok := c.pending[e.Id]
+	e0, ok := c.pending[id]
 	if !ok {
-		c.pending[e.Id] = e
+		c.pending[id] = e1
 		return
 	}
-	delete(c.pending, e.Id)
+	delete(c.pending, id)
 
-	call, response := e0, e
-	if e.Kind == int32(net.Call) {
-		call, response = e, e0
+	if e0.Kind == int32(net.Call) {
+		c.updateData(newCallEvent(e0, e1))
+	} else if e1.Kind == int32(net.Call) {
+		c.updateData(newCallEvent(e1, e0))
+	} else {
+		// invalid
 	}
-	c.updateData(newCallEvent(call, response))
 }
 
 func noMoreThan(max int, data *[]float64) []float64 {
