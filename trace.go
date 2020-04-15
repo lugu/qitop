@@ -116,14 +116,25 @@ func newCollector(sess bus.Session, w *widgets, service, method string) (*collec
 
 	// TODO: return a runner to a to the group.Run
 	go func(events chan bus.EventTrace) {
+	start:
+		e, ok := <-events
+		if !ok {
+			obj.EnableTrace(false)
+			return
+		}
+		c.refreshData(e)
 		for {
-			e, ok := <-events
-			if !ok {
-				obj.EnableTrace(false)
-				return
+			select {
+			case e, ok = <-events:
+				if !ok {
+					obj.EnableTrace(false)
+					return
+				}
+				c.refreshData(e)
+			default:
+				c.updateUI(w)
+				goto start
 			}
-			c.refreshData(e)
-			c.updateUI(w)
 		}
 	}(events)
 
