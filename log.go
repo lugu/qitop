@@ -73,11 +73,11 @@ func newLogger(sess bus.Session, w *widgets, service, method string) (*logger, e
 		defer logListener.Terminate(logListener.Proxy().ObjectID())
 		for {
 			msgs, ok := <-logs
+			if !ok {
+				w.logScroll.Reset()
+				return
+			}
 			for _, m := range msgs {
-				if !ok {
-					w.logScroll.Reset()
-					return
-				}
 				if m.Level == qilog.LogLevelNone {
 					continue
 				}
