@@ -111,7 +111,7 @@ func newTopList(ctx context.Context) (*selection.SelectionList, error) {
 
 func newSizePlot(ctx context.Context) (*linechart.LineChart, error) {
 	p, err := linechart.New(
-		linechart.YAxisFormattedValues(linechart.ValueFormatterRound),
+		linechart.YAxisFormattedValues(linechart.ValueFormatterRoundWithSuffix(" B")),
 		linechart.AxesCellOpts(cell.FgColor(cell.ColorBlue)),
 	)
 	if err != nil {
