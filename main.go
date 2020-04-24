@@ -277,7 +277,7 @@ func selectMethod(c *container.Container, w *widgets, service, method string) er
 	}
 	logger, err := newLogger(sess, w, service, method)
 	if err != nil {
-		return err
+		log.Printf("failed to create logger: %s")
 	}
 	info, err := newInfo(sess, w, service, method)
 	if err != nil {
