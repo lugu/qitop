@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"runtime/pprof"
 	"time"
 
 	"github.com/lugu/qiloop/app"
@@ -60,6 +61,7 @@ var (
 	logFile = flag.String("log-file", "", "file where to write qitop logs")
 	level   = flag.Int("log-level", 4,
 		"log level, 1:fatal, 2:error, 3:warning, 4:info, 5:verbose, 6:debug")
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 )
 
 // widgets holds the widgets used by this demo.
@@ -367,6 +369,14 @@ func run() (err error) {
 
 func main() {
 	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
