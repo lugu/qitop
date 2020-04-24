@@ -31,7 +31,7 @@ const (
 	rootID = "root"
 
 	// redrawInterval is how often termdash redraws the screen.
-	redrawInterval = 250 * time.Millisecond
+	redrawInterval = 500 * time.Millisecond
 )
 
 // layoutType represents the possible UI layouts
