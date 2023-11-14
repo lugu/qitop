@@ -6,6 +6,7 @@ import (
 
 	"github.com/mum4k/termdash/cell"
 	"github.com/mum4k/termdash/keyboard"
+	"github.com/mum4k/termdash/private/canvas"
 	"github.com/mum4k/termdash/terminal/terminalapi"
 	"github.com/mum4k/termdash/widgetapi"
 	"github.com/mum4k/termdash/widgets/text"
@@ -53,13 +54,21 @@ func (s *SelectionList) updateUI() {
 	}
 }
 
+func (s *SelectionList) Draw(cvs *canvas.Canvas, meta *widgetapi.Meta) error {
+	panic("Not yet implemented")
+}
+
+func (s *SelectionList) Mouse(m *terminalapi.Mouse, meta *widgetapi.EventMeta) error {
+	panic("Not yet implemented")
+}
+
 func (s *SelectionList) Configure(items []string, onSelect func(int, string) error) {
 	s.items = items
 	s.onSelect = onSelect
 	s.updateUI()
 }
 
-func (s *SelectionList) Keyboard(k *terminalapi.Keyboard) error {
+func (s *SelectionList) Keyboard(k *terminalapi.Keyboard, meta *widgetapi.EventMeta) error {
 	switch k.Key {
 	case 'k', keyboard.KeyArrowUp:
 		if s.current > 0 {
